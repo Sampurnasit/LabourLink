@@ -628,4 +628,24 @@ app.get('/jobs', async (req, res) => {
 
 app.listen(port, () => {
   console.log(`LabourLink server running at http://localhost:${port}`);
+
+  // Automatically maintain USB reverse port forwarding for connected Android devices
+  try {
+    const { execFile } = require('child_process');
+    const fs = require('fs');
+    const defaultAdb = path.join(process.env.LOCALAPPDATA || '', 'Android', 'Sdk', 'platform-tools', 'adb.exe');
+    const adbPath = fs.existsSync(defaultAdb) ? defaultAdb : 'adb';
+
+    function maintainAdbReverse() {
+      execFile(adbPath, ['reverse', `tcp:${port}`, `tcp:${port}`], () => {
+        // Silently succeed when device is connected, ignore if no device
+      });
+    }
+
+    maintainAdbReverse();
+    setInterval(maintainAdbReverse, 3000);
+    console.log(`Auto ADB reverse watcher active for Android devices on port ${port}`);
+  } catch (e) {
+    // Non-fatal if child_process/adb is unavailable
+  }
 });

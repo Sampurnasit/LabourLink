@@ -2,7 +2,12 @@ require('dotenv').config();
 const { createClient } = require('@supabase/supabase-js');
 const sqlite3 = require('sqlite3').verbose();
 const path = require('path');
-const { Pool } = require('pg');
+let Pool;
+try {
+  Pool = require('pg').Pool;
+} catch (_) {
+  Pool = null;
+}
 
 // ==========================================================================
 // 1. CONNECTION STRING INSPECTION & POOLER CONFIGURATION (Ports 5432 vs 6543)

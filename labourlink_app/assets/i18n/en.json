@@ -1,0 +1,51 @@
+{
+  "app": {
+    "name": "LabourLink",
+    "taglineBadge": "⚡ CHOWK — Direct Labour Matching",
+    "tagline": "Instant short-term gig matching.\nNo middlemen. Just work.",
+    "browseWithoutLogin": "Browse open jobs without signing in"
+  },
+  "landing": {
+    "whoAreYou": "Who are you?"
+  },
+  "role": {
+    "worker": "Worker",
+    "hirer": "Hirer",
+    "workerCardTitle": "I'm a Worker",
+    "workerCardDesc": "Find daily gigs, register skills & get hired today.",
+    "hirerCardTitle": "I'm a Hirer",
+    "hirerCardDesc": "Post jobs, browse workers & confirm hires instantly."
+  },
+  "login": {
+    "workerTitle": "Worker Login",
+    "hirerTitle": "Hirer Login",
+    "workerSubtitle": "Enter your registered phone number\nto access your Worker dashboard.",
+    "hirerSubtitle": "Enter your registered phone number\nto access your Hirer dashboard.",
+    "phoneLabel": "Phone Number",
+    "phonePlaceholder": "Enter 10-digit phone number",
+    "submitWorker": "Log In as Worker",
+    "submitHirer": "Log In as Hirer",
+    "loggingIn": "Logging in...",
+    "noAccount": "Don't have an account?",
+    "goBackRegister": "← Go back and Register",
+    "forgotNumber": "Forgot registered number?",
+    "helpText": "We will verify your profile using your phone number."
+  },
+  "validation": {
+    "phoneRequired": "Phone number is required",
+    "phoneInvalid": "Enter a valid 10-digit phone number",
+    "fillAllFields": "Please fill in all required fields"
+  },
+  "action": {
+    "logIn": "Log In",
+    "orRegister": "or Register",
+    "register": "Register",
+    "back": "Back"
+  },
+  "language": {
+    "select": "Language",
+    "en": "English",
+    "hi": "हिन्दी",
+    "bn": "বাংলা"
+  }
+}

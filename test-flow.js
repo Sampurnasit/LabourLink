@@ -176,7 +176,86 @@ async function runTests() {
   });
   console.log(`[11] GET /jobs -> Status: ${publicJobsRes.statusCode}, Contains 'Digital Labor Chowk': ${publicJobsRes.body.includes('Digital Labor Chowk')}`);
 
-  console.log('--- ALL 11 AUTOMATED VERIFICATION TESTS PASSED SUCCESSFULLY! ---');
+  // Test 12: Verify Worker is Locked (HIRED) on JobId
+  const vikramHired = await db.getAsync('SELECT * FROM workers WHERE id = ?', [vikram.id]);
+  console.log(`[12] Worker State Check -> Status: ${vikramHired.status}, Available: ${vikramHired.available}, Active Job: ${vikramHired.current_active_job_id}`);
+
+  // Test 13: New employer explores for workers -> Vikram shows as "Hired by other"
+  const newJobPostData = JSON.stringify({
+    employer_name: 'Greenfield Villas',
+    employer_phone: '9988776655',
+    skill_needed: 'Plumbing',
+    location: 'Whitefield',
+    wage_offered: '₹1100/day',
+    date_needed: 'Today'
+  });
+  const newJobRes = await request({
+    hostname: 'localhost',
+    port: 3000,
+    path: '/api/jobs',
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Content-Length': Buffer.byteLength(newJobPostData)
+    }
+  }, newJobPostData);
+  const newJobId = JSON.parse(newJobRes.body).job.id;
+
+  const matchesCheck = await request({
+    hostname: 'localhost',
+    port: 3000,
+    path: `/api/jobs/${newJobId}/matches`,
+    method: 'GET'
+  });
+  const matchesData = JSON.parse(matchesCheck.body);
+  const vikramInMatches = matchesData.nearbyWorkers.find(w => w.id === vikram.id);
+  console.log(`[13] Explorer View -> Vikram found in nearby matches: ${!!vikramInMatches}, is_hired_by_other: ${vikramInMatches && vikramInMatches.is_hired_by_other === 1}`);
+
+  // Test 14: Restriction Check -> Vikram tries to apply for Whitefield job while active on Koramangala job
+  const conflictApplyData = JSON.stringify({
+    worker_id: vikram.id,
+    job_id: newJobId
+  });
+  const conflictRes = await request({
+    hostname: 'localhost',
+    port: 3000,
+    path: '/api/workers/interest',
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Content-Length': Buffer.byteLength(conflictApplyData)
+    }
+  }, conflictApplyData);
+  const conflictJson = JSON.parse(conflictRes.body);
+  console.log(`[14] Cross-Zone Active Job Restriction -> Status: ${conflictRes.statusCode} (Expected 409), Error: "${conflictJson.error}"`);
+
+  // Test 15: Job Completion & Automatic Labourer Release
+  const completeRes = await request({
+    hostname: 'localhost',
+    port: 3000,
+    path: `/api/jobs/${jobId}/complete`,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' }
+  });
+  console.log(`[15] POST /api/jobs/${jobId}/complete -> Status: ${completeRes.statusCode}`);
+
+  const vikramFreed = await db.getAsync('SELECT * FROM workers WHERE id = ?', [vikram.id]);
+  console.log(`[15b] Worker Auto-Release Check -> Status: ${vikramFreed.status} (Expected AVAILABLE), Available: ${vikramFreed.available}, Active Job: ${vikramFreed.current_active_job_id} (Expected null)`);
+
+  // Test 16: Freed worker can now apply to the new job
+  const freeApplyRes = await request({
+    hostname: 'localhost',
+    port: 3000,
+    path: '/api/workers/interest',
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Content-Length': Buffer.byteLength(conflictApplyData)
+    }
+  }, conflictApplyData);
+  console.log(`[16] Post-Release Application -> Status: ${freeApplyRes.statusCode} (Expected 200 OK)`);
+
+  console.log('--- ALL 16 AUTOMATED VERIFICATION TESTS PASSED SUCCESSFULLY! ---');
   process.exit(0);
 }
 

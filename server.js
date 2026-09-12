@@ -25,11 +25,59 @@ app.use('/app', express.static(flutterBuildDir));
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
+// Request logging
+app.use((req, res, next) => {
+  if (req.path.startsWith('/api')) {
+    console.log(`[API ${req.method}] ${req.path} from ${req.ip}`);
+  }
+  next();
+});
+
+// Health check endpoint
+app.get('/api/health', (req, res) => {
+  res.json({ status: 'ok', time: new Date().toISOString() });
+});
+
 // Helper to sanitize phone input (extracts last 10 digits e.g. for Indian numbers with +91 or leading 0)
 function cleanPhone(phone) {
   if (!phone) return '';
   const digits = String(phone).replace(/[^0-9]/g, '');
   return digits.length > 10 ? digits.slice(-10) : digits;
+}
+
+// Helper to check worker active job conflict & cross-zone restrictions
+async function checkWorkerActiveConflict(workerId, targetJobId) {
+  const worker = await db.getAsync(
+    `SELECT w.*, j.location as active_job_location, j.status as active_job_status, j.date_needed as active_job_date
+     FROM workers w
+     LEFT JOIN jobs j ON w.current_active_job_id = j.id
+     WHERE w.id = ?`,
+    [workerId]
+  );
+
+  if (!worker) {
+    return { hasConflict: false, notFound: true };
+  }
+
+  // Active if status is 'HIRED' or current_active_job_id exists and is not COMPLETED/CANCELLED
+  const isActivelyEmployed = worker.status === 'HIRED' ||
+    (worker.current_active_job_id && !['COMPLETED', 'CANCELLED'].includes(worker.active_job_status));
+
+  if (isActivelyEmployed) {
+    const targetJob = targetJobId ? await db.getAsync('SELECT * FROM jobs WHERE id = ?', [targetJobId]) : null;
+    const activeZone = worker.current_location_zone || worker.active_job_location;
+    const isDifferentArea = targetJob && activeZone && targetJob.location !== activeZone;
+
+    return {
+      hasConflict: true,
+      worker,
+      message: isDifferentArea
+        ? `You are currently assigned to an active job in another area (${activeZone}).`
+        : 'You are currently assigned to an active job and cannot apply for or accept new jobs.'
+    };
+  }
+
+  return { hasConflict: false, worker };
 }
 
 // ==========================================================================
@@ -113,15 +161,26 @@ app.get('/api/jobs/:id/matches', async (req, res) => {
       return res.status(404).json({ error: 'Job not found' });
     }
 
-    // Direct matches: same skill + same location + available = 1
+    // Direct matches: same skill + same location
+    // Both available workers and workers hired by other employers are returned
     const matchedWorkers = await db.allAsync(
-      'SELECT * FROM workers WHERE skill_type = ? AND location = ? AND available = 1 ORDER BY id DESC',
+      `SELECT w.*, 
+              (CASE WHEN w.status = 'HIRED' OR w.current_active_job_id IS NOT NULL THEN 1 ELSE 0 END) as is_hired_by_other,
+              w.current_location_zone as active_zone
+       FROM workers w
+       WHERE w.skill_type = ? AND w.location = ?
+       ORDER BY (CASE WHEN w.status = 'HIRED' OR w.current_active_job_id IS NOT NULL THEN 1 ELSE 0 END), w.id DESC`,
       [job.skill_needed, job.location]
     );
 
     // Nearby citywide workers with same skill
     const nearbyWorkers = await db.allAsync(
-      'SELECT * FROM workers WHERE skill_type = ? AND location != ? AND available = 1 ORDER BY id DESC LIMIT 5',
+      `SELECT w.*, 
+              (CASE WHEN w.status = 'HIRED' OR w.current_active_job_id IS NOT NULL THEN 1 ELSE 0 END) as is_hired_by_other,
+              w.current_location_zone as active_zone
+       FROM workers w
+       WHERE w.skill_type = ? AND w.location != ?
+       ORDER BY (CASE WHEN w.status = 'HIRED' OR w.current_active_job_id IS NOT NULL THEN 1 ELSE 0 END), w.id DESC LIMIT 5`,
       [job.skill_needed, job.location]
     );
 
@@ -217,6 +276,14 @@ app.post('/api/workers/interest', async (req, res) => {
       return res.status(400).json({ error: 'worker_id and job_id are required' });
     }
 
+    const conflict = await checkWorkerActiveConflict(worker_id, job_id);
+    if (conflict.notFound) {
+      return res.status(404).json({ error: 'Worker not found' });
+    }
+    if (conflict.hasConflict) {
+      return res.status(409).json({ error: conflict.message });
+    }
+
     await db.runAsync(
       `INSERT INTO job_interests (job_id, worker_id, status)
        VALUES (?, ?, 'interested')
@@ -272,7 +339,7 @@ app.get('/api/employers/:phone/jobs', async (req, res) => {
   }
 });
 
-// 10. Employer Confirm Worker
+// 10. Employer Confirm Worker (Locks worker to active job)
 app.post('/api/employers/confirm-worker', async (req, res) => {
   try {
     const { job_id, worker_id } = req.body;
@@ -280,13 +347,75 @@ app.post('/api/employers/confirm-worker', async (req, res) => {
       return res.status(400).json({ error: 'job_id and worker_id are required' });
     }
 
+    const job = await db.getAsync('SELECT * FROM jobs WHERE id = ?', [job_id]);
+    if (!job) {
+      return res.status(404).json({ error: 'Job not found' });
+    }
+
+    const conflict = await checkWorkerActiveConflict(worker_id, job_id);
+    if (conflict.hasConflict) {
+      return res.status(409).json({ error: 'This worker is currently assigned to an active job.' });
+    }
+
     await db.runAsync(
       "UPDATE job_interests SET status = 'confirmed' WHERE job_id = ? AND worker_id = ?",
       [job_id, worker_id]
     );
     await db.runAsync("UPDATE jobs SET status = 'filled' WHERE id = ?", [job_id]);
+    await db.runAsync(
+      `UPDATE workers 
+       SET status = 'HIRED', available = 0, current_active_job_id = ?, current_location_zone = ? 
+       WHERE id = ?`,
+      [job_id, job.location, worker_id]
+    );
 
-    res.json({ status: 'ok', message: 'Worker confirmed and job marked filled' });
+    res.json({ status: 'ok', message: 'Worker confirmed and assigned to active job' });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// 11. Complete Job (releases labourer back to available)
+app.post('/api/jobs/:id/complete', async (req, res) => {
+  try {
+    const jobId = req.params.id;
+    const job = await db.getAsync('SELECT * FROM jobs WHERE id = ?', [jobId]);
+    if (!job) {
+      return res.status(404).json({ error: 'Job not found' });
+    }
+
+    await db.runAsync("UPDATE jobs SET status = 'completed' WHERE id = ?", [jobId]);
+    await db.runAsync(
+      `UPDATE workers 
+       SET status = 'AVAILABLE', available = 1, current_active_job_id = NULL, current_location_zone = NULL 
+       WHERE current_active_job_id = ?`,
+      [jobId]
+    );
+
+    res.json({ status: 'ok', message: 'Job completed and labourer is now available' });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// 12. Cancel Job (releases labourer back to available)
+app.post('/api/jobs/:id/cancel', async (req, res) => {
+  try {
+    const jobId = req.params.id;
+    const job = await db.getAsync('SELECT * FROM jobs WHERE id = ?', [jobId]);
+    if (!job) {
+      return res.status(404).json({ error: 'Job not found' });
+    }
+
+    await db.runAsync("UPDATE jobs SET status = 'cancelled' WHERE id = ?", [jobId]);
+    await db.runAsync(
+      `UPDATE workers 
+       SET status = 'AVAILABLE', available = 1, current_active_job_id = NULL, current_location_zone = NULL 
+       WHERE current_active_job_id = ?`,
+      [jobId]
+    );
+
+    res.json({ status: 'ok', message: 'Job cancelled and labourer is now available' });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -443,6 +572,11 @@ app.post('/worker/interest', async (req, res) => {
       return res.status(400).redirect('/worker/dashboard');
     }
 
+    const conflict = await checkWorkerActiveConflict(worker_id, job_id);
+    if (conflict.hasConflict) {
+      return res.redirect(`/worker/dashboard?phone=${encodeURIComponent(phone || '')}&error=${encodeURIComponent(conflict.message)}`);
+    }
+
     await db.runAsync(
       `INSERT INTO job_interests (job_id, worker_id, status)
        VALUES (?, ?, 'interested')
@@ -512,13 +646,24 @@ app.get('/employer/post-success/:id', async (req, res) => {
       return res.status(404).send('Job not found');
     }
 
+    // Direct matches with is_hired_by_other indicator
     const matchedWorkers = await db.allAsync(
-      'SELECT * FROM workers WHERE skill_type = ? AND location = ? AND available = 1 ORDER BY id DESC',
+      `SELECT w.*, 
+              (CASE WHEN w.status = 'HIRED' OR w.current_active_job_id IS NOT NULL THEN 1 ELSE 0 END) as is_hired_by_other,
+              w.current_location_zone as active_zone
+       FROM workers w 
+       WHERE skill_type = ? AND location = ? 
+       ORDER BY (CASE WHEN w.status = 'HIRED' OR w.current_active_job_id IS NOT NULL THEN 1 ELSE 0 END), id DESC`,
       [job.skill_needed, job.location]
     );
 
     const nearbyWorkers = await db.allAsync(
-      'SELECT * FROM workers WHERE skill_type = ? AND location != ? AND available = 1 ORDER BY id DESC LIMIT 4',
+      `SELECT w.*, 
+              (CASE WHEN w.status = 'HIRED' OR w.current_active_job_id IS NOT NULL THEN 1 ELSE 0 END) as is_hired_by_other,
+              w.current_location_zone as active_zone
+       FROM workers w 
+       WHERE skill_type = ? AND location != ? 
+       ORDER BY (CASE WHEN w.status = 'HIRED' OR w.current_active_job_id IS NOT NULL THEN 1 ELSE 0 END), id DESC LIMIT 4`,
       [job.skill_needed, job.location]
     );
 
@@ -537,6 +682,10 @@ app.get('/employer/dashboard', async (req, res) => {
 
     if (req.query.confirmed) {
       successMessage = 'Worker confirmed successfully! The job has been marked filled.';
+    } else if (req.query.completed) {
+      successMessage = 'Job marked COMPLETED! The hired labourer is now freed and available for new work.';
+    } else if (req.query.cancelled) {
+      successMessage = 'Job CANCELLED. The hired labourer is now freed.';
     }
 
     if (!phone) {
@@ -554,7 +703,7 @@ app.get('/employer/dashboard', async (req, res) => {
 
     for (const job of jobs) {
       const interestedWorkers = await db.allAsync(
-        `SELECT w.id as worker_id, w.name, w.phone_number, w.skill_type, w.location, w.available, ji.status
+        `SELECT w.id as worker_id, w.name, w.phone_number, w.skill_type, w.location, w.available, w.status, ji.status as interest_status
          FROM job_interests ji
          JOIN workers w ON ji.worker_id = w.id
          WHERE ji.job_id = ?
@@ -583,16 +732,74 @@ app.post('/employer/confirm-worker', async (req, res) => {
       return res.status(400).redirect('/employer/dashboard');
     }
 
+    const job = await db.getAsync('SELECT * FROM jobs WHERE id = ?', [job_id]);
+    if (!job) {
+      return res.status(404).send('Job not found');
+    }
+
+    const conflict = await checkWorkerActiveConflict(worker_id, job_id);
+    if (conflict.hasConflict) {
+      return res.redirect(`/employer/dashboard?phone=${encodeURIComponent(employer_phone || '')}&error=${encodeURIComponent(conflict.message)}`);
+    }
+
     await db.runAsync(
       "UPDATE job_interests SET status = 'confirmed' WHERE job_id = ? AND worker_id = ?",
       [job_id, worker_id]
     );
     await db.runAsync("UPDATE jobs SET status = 'filled' WHERE id = ?", [job_id]);
+    await db.runAsync(
+      `UPDATE workers 
+       SET status = 'HIRED', available = 0, current_active_job_id = ?, current_location_zone = ? 
+       WHERE id = ?`,
+      [job_id, job.location, worker_id]
+    );
 
     res.redirect(`/employer/dashboard?phone=${encodeURIComponent(employer_phone)}&confirmed=1`);
   } catch (err) {
     console.error('Error confirming worker:', err);
     res.redirect(`/employer/dashboard?phone=${encodeURIComponent(req.body.employer_phone || '')}`);
+  }
+});
+
+// Complete Job (Web route)
+app.post('/employer/jobs/:id/complete', async (req, res) => {
+  try {
+    const jobId = req.params.id;
+    const phone = req.body.employer_phone;
+
+    await db.runAsync("UPDATE jobs SET status = 'completed' WHERE id = ?", [jobId]);
+    await db.runAsync(
+      `UPDATE workers 
+       SET status = 'AVAILABLE', available = 1, current_active_job_id = NULL, current_location_zone = NULL 
+       WHERE current_active_job_id = ?`,
+      [jobId]
+    );
+
+    res.redirect(`/employer/dashboard?phone=${encodeURIComponent(phone || '')}&completed=1`);
+  } catch (err) {
+    console.error('Error completing job:', err);
+    res.redirect('/employer/dashboard');
+  }
+});
+
+// Cancel Job (Web route)
+app.post('/employer/jobs/:id/cancel', async (req, res) => {
+  try {
+    const jobId = req.params.id;
+    const phone = req.body.employer_phone;
+
+    await db.runAsync("UPDATE jobs SET status = 'cancelled' WHERE id = ?", [jobId]);
+    await db.runAsync(
+      `UPDATE workers 
+       SET status = 'AVAILABLE', available = 1, current_active_job_id = NULL, current_location_zone = NULL 
+       WHERE current_active_job_id = ?`,
+      [jobId]
+    );
+
+    res.redirect(`/employer/dashboard?phone=${encodeURIComponent(phone || '')}&cancelled=1`);
+  } catch (err) {
+    console.error('Error cancelling job:', err);
+    res.redirect('/employer/dashboard');
   }
 });
 
@@ -626,6 +833,6 @@ app.get('/jobs', async (req, res) => {
   }
 });
 
-app.listen(port, () => {
-  console.log(`LabourLink server running at http://localhost:${port}`);
+app.listen(port, '0.0.0.0', () => {
+  console.log(`LabourLink server running at http://0.0.0.0:${port} (Local: http://localhost:${port}, Wi-Fi: http://192.168.0.161:${port})`);
 });

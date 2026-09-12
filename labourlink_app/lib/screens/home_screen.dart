@@ -29,19 +29,50 @@ class _HomeScreenState extends State<HomeScreen> {
 
   Future<void> _loadData() async {
     setState(() => _isLoading = true);
-    final statsFuture = ApiService.getStats();
-    final jobsFuture = ApiService.getJobs();
+    var statsMap = await ApiService.getStats();
+    if (statsMap.isEmpty) {
+      final found = await ApiService.autoDiscoverServer();
+      if (found) {
+        statsMap = await ApiService.getStats();
+      }
+    }
+    final jobsList = (await ApiService.getJobs()).take(4).toList();
 
-    final results = await Future.wait([statsFuture, jobsFuture]);
     if (mounted) {
-      final statsMap = results[0] as Map<String, dynamic>;
-      final jobsList = (results[1] as List<Job>).take(4).toList();
       setState(() {
         _stats = statsMap;
         _recentJobs = jobsList;
         _isServerConnected = statsMap.isNotEmpty;
         _isLoading = false;
       });
+    }
+  }
+
+  Future<void> _autoReconnect() async {
+    setState(() => _isLoading = true);
+    final connected = await ApiService.autoDiscoverServer();
+    if (connected) {
+      await _loadData();
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            backgroundColor: const Color(0xFF10B981),
+            content: Text('✓ Connected to backend at: ${ApiService.baseUrl}'),
+            duration: const Duration(seconds: 3),
+          ),
+        );
+      }
+    } else {
+      if (mounted) {
+        setState(() => _isLoading = false);
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            backgroundColor: Colors.red,
+            content: Text('Could not reach backend server on any known IP.'),
+            duration: Duration(seconds: 3),
+          ),
+        );
+      }
     }
   }
 
@@ -83,13 +114,18 @@ class _HomeScreenState extends State<HomeScreen> {
                     ),
                     ActionChip(
                       avatar: const Icon(Icons.wifi, size: 14),
-                      label: const Text('Wi-Fi (192.168.0.196)', style: TextStyle(fontSize: 12)),
-                      onPressed: () => setDialogState(() => controller.text = 'http://192.168.0.196:3000'),
+                      label: const Text('Wi-Fi (192.168.0.161)', style: TextStyle(fontSize: 12)),
+                      onPressed: () => setDialogState(() => controller.text = 'http://192.168.0.161:3000'),
                     ),
                     ActionChip(
                       avatar: const Icon(Icons.phone_android, size: 14),
                       label: const Text('Emulator (10.0.2.2)', style: TextStyle(fontSize: 12)),
                       onPressed: () => setDialogState(() => controller.text = 'http://10.0.2.2:3000'),
+                    ),
+                    ActionChip(
+                      avatar: const Icon(Icons.lan, size: 14),
+                      label: const Text('Loopback (127.0.0.1)', style: TextStyle(fontSize: 12)),
+                      onPressed: () => setDialogState(() => controller.text = 'http://127.0.0.1:3000'),
                     ),
                   ],
                 ),
@@ -125,20 +161,39 @@ class _HomeScreenState extends State<HomeScreen> {
                               });
                             },
                     ),
-                    const SizedBox(width: 8),
-                    if (testStatus != null)
-                      Expanded(
-                        child: Text(
-                          testStatus!,
-                          style: TextStyle(
-                            fontSize: 12,
-                            fontWeight: FontWeight.bold,
-                            color: testStatus!.startsWith('✓') ? const Color(0xFF10B981) : Colors.red,
-                          ),
-                        ),
-                      ),
+                    const SizedBox(width: 6),
+                    TextButton.icon(
+                      icon: const Icon(Icons.auto_mode, size: 16),
+                      label: const Text('Auto-Detect', style: TextStyle(fontSize: 12)),
+                      onPressed: isTesting
+                          ? null
+                          : () async {
+                              setDialogState(() {
+                                isTesting = true;
+                                testStatus = null;
+                              });
+                              final ok = await ApiService.autoDiscoverServer();
+                              setDialogState(() {
+                                isTesting = false;
+                                controller.text = ApiService.baseUrl;
+                                testStatus = ok ? '✓ Auto-found server!' : '✗ No server found';
+                              });
+                            },
+                    ),
                   ],
                 ),
+                if (testStatus != null)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 8),
+                    child: Text(
+                      testStatus!,
+                      style: TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.bold,
+                        color: testStatus!.startsWith('✓') ? const Color(0xFF10B981) : Colors.red,
+                      ),
+                    ),
+                  ),
               ],
             ),
           ),
@@ -263,19 +318,30 @@ class _HomeScreenState extends State<HomeScreen> {
                               style: TextStyle(fontWeight: FontWeight.bold, color: Colors.red, fontSize: 13),
                             ),
                             Text(
-                              'Cannot connect to backend API. Tap "Connect" to check server URL.',
+                              'Cannot reach backend. Tap "Auto-Fix" to automatically connect to live server.',
                               style: TextStyle(fontSize: 11, color: Color(0xFF7F1D1D)),
                             ),
                           ],
                         ),
                       ),
-                      FilledButton.tonal(
+                      const SizedBox(width: 8),
+                      FilledButton(
                         style: FilledButton.styleFrom(
+                          backgroundColor: const Color(0xFF2563EB),
                           padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
                           visualDensity: VisualDensity.compact,
                         ),
+                        onPressed: _autoReconnect,
+                        child: const Text('Auto-Fix', style: TextStyle(fontSize: 12, color: Colors.white, fontWeight: FontWeight.bold)),
+                      ),
+                      const SizedBox(width: 6),
+                      FilledButton.tonal(
+                        style: FilledButton.styleFrom(
+                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+                          visualDensity: VisualDensity.compact,
+                        ),
                         onPressed: _showApiSettingsDialog,
-                        child: const Text('Connect', style: TextStyle(fontSize: 12)),
+                        child: const Icon(Icons.settings, size: 16),
                       ),
                     ],
                   ),

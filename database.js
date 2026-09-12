@@ -25,9 +25,23 @@ function initSchema() {
         skill_type TEXT NOT NULL,
         location TEXT NOT NULL,
         available BOOLEAN DEFAULT 1,
-        registered_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        status TEXT DEFAULT 'AVAILABLE',
+        current_active_job_id INTEGER DEFAULT NULL,
+        current_location_zone TEXT DEFAULT NULL,
+        registered_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (current_active_job_id) REFERENCES jobs(id) ON DELETE SET NULL
       )`, (err) => {
         if (err) return reject(err);
+      });
+
+      // Safe column migrations for existing databases
+      const workerCols = [
+        "ALTER TABLE workers ADD COLUMN status TEXT DEFAULT 'AVAILABLE'",
+        "ALTER TABLE workers ADD COLUMN current_active_job_id INTEGER DEFAULT NULL",
+        "ALTER TABLE workers ADD COLUMN current_location_zone TEXT DEFAULT NULL"
+      ];
+      workerCols.forEach(cmd => {
+        db.run(cmd, () => {}); // Ignore error if column already exists
       });
 
       // 2. jobs table

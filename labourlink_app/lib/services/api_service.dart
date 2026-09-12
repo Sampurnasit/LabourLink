@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
@@ -6,14 +7,23 @@ import '../models/worker.dart';
 import '../models/job.dart';
 
 class ApiService {
-  // Configurable base URL
+  static const Duration requestTimeout = Duration(seconds: 4);
+
+  // Candidate URLs for auto-discovery
+  static List<String> get candidateUrls => [
+    'http://localhost:3000',
+    'http://10.0.2.2:3000',
+    'http://192.168.0.161:3000',
+    'http://127.0.0.1:3000',
+  ];
+
   static String get defaultBaseUrl {
     if (kIsWeb) {
       return 'http://localhost:3000';
     }
     switch (defaultTargetPlatform) {
       case TargetPlatform.android:
-        return 'http://localhost:3000';
+        return 'http://10.0.2.2:3000';
       default:
         return 'http://localhost:3000';
     }
@@ -26,26 +36,33 @@ class ApiService {
       final prefs = await SharedPreferences.getInstance();
       final savedUrl = prefs.getString('api_base_url');
       if (savedUrl != null && savedUrl.trim().isNotEmpty) {
-        baseUrl = savedUrl.trim().replaceAll(RegExp(r'/+$'), '');
-        return;
+        final ok = await testConnection(savedUrl.trim());
+        if (ok) {
+          baseUrl = savedUrl.trim().replaceAll(RegExp(r'/+$'), '');
+          return;
+        }
       }
     } catch (_) {}
 
-    // Auto-detect working endpoint on Android
-    if (!kIsWeb && defaultTargetPlatform == TargetPlatform.android) {
-      final candidates = [
-        'http://localhost:3000',      // Works on physical device via adb reverse
-        'http://192.168.0.196:3000',  // Works on local Wi-Fi
-        'http://10.0.2.2:3000',       // Works on Android Studio emulator
-      ];
-      for (final candidate in candidates) {
-        final reachable = await testConnection(candidate);
-        if (reachable) {
-          baseUrl = candidate;
-          break;
-        }
+    // Auto-discover the working server endpoint
+    await autoDiscoverServer();
+  }
+
+  static Future<bool> autoDiscoverServer() async {
+    // Probe all candidate URLs in parallel
+    for (final candidate in candidateUrls) {
+      final reachable = await testConnection(candidate);
+      if (reachable) {
+        baseUrl = candidate;
+        try {
+          final prefs = await SharedPreferences.getInstance();
+          await prefs.setString('api_base_url', baseUrl);
+        } catch (_) {}
+        debugPrint('[ApiService] Connected to backend at: $baseUrl');
+        return true;
       }
     }
+    return false;
   }
 
   static Future<void> setBaseUrl(String newUrl) async {
@@ -61,7 +78,7 @@ class ApiService {
   static Future<bool> testConnection([String? candidateUrl]) async {
     try {
       final target = (candidateUrl ?? baseUrl).trim().replaceAll(RegExp(r'/+$'), '');
-      final res = await http.get(Uri.parse('$target/api/stats')).timeout(const Duration(seconds: 3));
+      final res = await http.get(Uri.parse('$target/api/stats')).timeout(const Duration(milliseconds: 1800));
       return res.statusCode == 200;
     } catch (_) {
       return false;
@@ -71,7 +88,7 @@ class ApiService {
   // 1. Platform Statistics
   static Future<Map<String, dynamic>> getStats() async {
     try {
-      final res = await http.get(Uri.parse('$baseUrl/api/stats'));
+      final res = await http.get(Uri.parse('$baseUrl/api/stats')).timeout(requestTimeout);
       if (res.statusCode == 200) {
         return jsonDecode(res.body) as Map<String, dynamic>;
       }
@@ -90,7 +107,7 @@ class ApiService {
         if (location != null && location.isNotEmpty) 'location': location,
       });
 
-      final res = await http.get(uri);
+      final res = await http.get(uri).timeout(requestTimeout);
       if (res.statusCode == 200) {
         final data = jsonDecode(res.body);
         final list = data['jobs'] as List? ?? [];
@@ -124,7 +141,7 @@ class ApiService {
           'wage_offered': wageOffered,
           'date_needed': dateNeeded,
         }),
-      );
+      ).timeout(requestTimeout);
 
       if (res.statusCode == 201) {
         final data = jsonDecode(res.body);
@@ -140,7 +157,7 @@ class ApiService {
   // 4. Instant Matches for a Job
   static Future<Map<String, dynamic>?> getJobMatches(int jobId) async {
     try {
-      final res = await http.get(Uri.parse('$baseUrl/api/jobs/$jobId/matches'));
+      final res = await http.get(Uri.parse('$baseUrl/api/jobs/$jobId/matches')).timeout(requestTimeout);
       if (res.statusCode == 200) {
         final data = jsonDecode(res.body);
         final job = Job.fromJson(data['job']);
@@ -183,7 +200,7 @@ class ApiService {
           'location': location,
           'available': available,
         }),
-      );
+      ).timeout(requestTimeout);
 
       if (res.statusCode == 200) {
         final data = jsonDecode(res.body);
@@ -199,7 +216,7 @@ class ApiService {
   // 6. Get Worker Profile & Matched Jobs by Phone
   static Future<Map<String, dynamic>?> getWorkerProfile(String phone) async {
     try {
-      final res = await http.get(Uri.parse('$baseUrl/api/workers/$phone'));
+      final res = await http.get(Uri.parse('$baseUrl/api/workers/$phone')).timeout(requestTimeout);
       if (res.statusCode == 200) {
         final data = jsonDecode(res.body);
         return {
@@ -232,7 +249,7 @@ class ApiService {
           'worker_id': workerId,
           'job_id': jobId,
         }),
-      );
+      ).timeout(requestTimeout);
       return res.statusCode == 200;
     } catch (e) {
       debugPrint('Error expressing interest: $e');
@@ -250,7 +267,7 @@ class ApiService {
           'phone': phone,
           'available': available,
         }),
-      );
+      ).timeout(requestTimeout);
 
       if (res.statusCode == 200) {
         final data = jsonDecode(res.body);
@@ -266,7 +283,7 @@ class ApiService {
   // 9. Get Employer's Posted Jobs
   static Future<List<Job>> getEmployerJobs(String phone) async {
     try {
-      final res = await http.get(Uri.parse('$baseUrl/api/employers/$phone/jobs'));
+      final res = await http.get(Uri.parse('$baseUrl/api/employers/$phone/jobs')).timeout(requestTimeout);
       if (res.statusCode == 200) {
         final data = jsonDecode(res.body);
         final list = data['jobs'] as List? ?? [];
@@ -289,10 +306,38 @@ class ApiService {
           'job_id': jobId,
           'worker_id': workerId,
         }),
-      );
+      ).timeout(requestTimeout);
       return res.statusCode == 200;
     } catch (e) {
       debugPrint('Error confirming worker: $e');
+      return false;
+    }
+  }
+
+  // 11. Complete a Job (Frees up labourer)
+  static Future<bool> completeJob(int jobId) async {
+    try {
+      final res = await http.post(
+        Uri.parse('$baseUrl/api/jobs/$jobId/complete'),
+        headers: {'Content-Type': 'application/json'},
+      ).timeout(requestTimeout);
+      return res.statusCode == 200;
+    } catch (e) {
+      debugPrint('Error completing job: $e');
+      return false;
+    }
+  }
+
+  // 12. Cancel a Job (Frees up labourer)
+  static Future<bool> cancelJob(int jobId) async {
+    try {
+      final res = await http.post(
+        Uri.parse('$baseUrl/api/jobs/$jobId/cancel'),
+        headers: {'Content-Type': 'application/json'},
+      ).timeout(requestTimeout);
+      return res.statusCode == 200;
+    } catch (e) {
+      debugPrint('Error cancelling job: $e');
       return false;
     }
   }

@@ -110,13 +110,21 @@ async function seed() {
     `INSERT INTO job_interests (job_id, worker_id, status) VALUES (?, ?, 'interested')`,
     [jobIds[3], workerMap['9876500003']]
   );
-  // Kavita Reddy (Job 4) confirmed Sunita Devi (9876500005)
+  // Kavita Reddy (Job 4) confirmed Sunita Devi (9876500005) on Domestic Help in HSR Layout
   await db.runAsync(
     `INSERT INTO job_interests (job_id, worker_id, status) VALUES (?, ?, 'confirmed')`,
     [jobIds[4], workerMap['9876500005']]
   );
 
-  console.log('✓ Seeded sample job interests');
+  // Update Sunita Devi's status to HIRED, locked to Job 4 in HSR Layout
+  await db.runAsync(
+    `UPDATE workers 
+     SET status = 'HIRED', available = 0, current_active_job_id = ?, current_location_zone = 'HSR Layout'
+     WHERE id = ?`,
+    [jobIds[4], workerMap['9876500005']]
+  );
+
+  console.log('✓ Seeded sample job interests and active bookings');
   console.log('Database seeding complete!');
 }
 

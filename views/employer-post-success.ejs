@@ -46,12 +46,19 @@
             <div>
               <div class="card-top">
                 <span class="badge badge-skill"><%= worker.skill_type %></span>
-                <span class="badge badge-available">● Available Today</span>
+                <% if (worker.is_hired_by_other || worker.status === 'HIRED') { %>
+                  <span class="badge" style="background: #fef3c7; color: #b45309; border: 1px solid #fcd34d; font-weight: 700;">● Hired by Other</span>
+                <% } else { %>
+                  <span class="badge badge-available">● Available Today</span>
+                <% } %>
               </div>
               <div class="card-person-name" style="margin-top: 0.75rem;"><%= worker.name %></div>
               <div class="card-meta">
                 <span class="badge badge-location">📍 <%= worker.location %></span>
                 <span class="badge badge-open">Registered <%= new Date(worker.registered_at).toLocaleDateString() %></span>
+                <% if (worker.active_zone) { %>
+                  <span class="badge badge-warning">Active in <%= worker.active_zone %></span>
+                <% } %>
               </div>
             </div>
 
@@ -60,9 +67,15 @@
                 <span>📞 Phone:</span>
                 <strong style="color: #0f172a;"><%= worker.phone_number %></strong>
               </div>
-              <a href="tel:<%= worker.phone_number %>" class="btn btn-success btn-block btn-sm" style="margin-top: 0.75rem;">
-                📞 Call Worker Directly
-              </a>
+              <% if (worker.is_hired_by_other || worker.status === 'HIRED') { %>
+                <button class="btn btn-block btn-sm" disabled style="margin-top: 0.75rem; background: #e2e8f0; color: #64748b; cursor: not-allowed;">
+                  🔒 Currently on Active Job (<%= worker.active_zone || 'Other Area' %>)
+                </button>
+              <% } else { %>
+                <a href="tel:<%= worker.phone_number %>" class="btn btn-success btn-block btn-sm" style="margin-top: 0.75rem;">
+                  📞 Call Worker Directly
+                </a>
+              <% } %>
             </div>
           </div>
         <% }) %>

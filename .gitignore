@@ -26,12 +26,15 @@ labourlink_app/*.iml
 
 # Android specific
 labourlink_app/android/.gradle/
+labourlink_app/android/build/
+labourlink_app/android/ndk/
 labourlink_app/android/local.properties
 labourlink_app/android/app/debug/
 labourlink_app/android/app/profile/
 labourlink_app/android/app/release/
 labourlink_app/android/*.iml
 labourlink_app/android/.kotlin/
+*.zip
 
 # iOS specific
 labourlink_app/ios/Flutter/.last_build_id

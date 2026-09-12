@@ -123,6 +123,106 @@ app.get('/api/stats', async (req, res) => {
   }
 });
 
+// ==========================================================================
+// PUBLIC API ENDPOINTS — No authentication required, sensitive data masked
+// ==========================================================================
+
+// Helper: mask phone number → show only last 2 digits (e.g. ******89)
+function maskPhone(phone) {
+  if (!phone || phone.length < 2) return '••••••••';
+  return '••••••' + String(phone).slice(-2);
+}
+
+// Helper: mask name → show first name + last initial (e.g. "Rajan K.")
+function maskName(name) {
+  if (!name) return 'Anonymous';
+  const parts = name.trim().split(/\s+/);
+  if (parts.length === 1) return parts[0];
+  return parts[0] + ' ' + parts[parts.length - 1][0] + '.';
+}
+
+// Helper: parse wage string to number for filtering (e.g. "₹700/day" → 700)
+function parseWage(wageStr) {
+  if (!wageStr) return 0;
+  const match = String(wageStr).match(/\d+/);
+  return match ? parseInt(match[0]) : 0;
+}
+
+// Public Jobs Feed (GET /api/public/jobs)
+// Supports: ?skill=&location=&minWage=&maxWage=
+app.get('/api/public/jobs', async (req, res) => {
+  try {
+    const { skill, location, minWage, maxWage } = req.query;
+    let query = supabase.from('jobs').select('*').eq('status', 'open');
+
+    if (skill) query = query.eq('skill_needed', skill);
+    if (location) query = query.eq('location', location);
+    query = query.order('id', { ascending: false }).limit(100);
+
+    const { data: rawJobs, error } = await query;
+    if (error) throw error;
+
+    // Mask sensitive fields and optionally filter by wage range
+    const min = minWage ? parseInt(minWage) : null;
+    const max = maxWage ? parseInt(maxWage) : null;
+
+    const publicJobs = (rawJobs || [])
+      .filter(j => {
+        const wage = parseWage(j.wage_offered);
+        if (min !== null && wage < min) return false;
+        if (max !== null && wage > max) return false;
+        return true;
+      })
+      .map(j => ({
+        id: j.id,
+        employer_name: maskName(j.employer_name),
+        // employer_phone intentionally omitted from public feed
+        skill_needed: j.skill_needed,
+        location: j.location,
+        wage_offered: j.wage_offered,
+        date_needed: j.date_needed,
+        status: j.status,
+        created_at: j.created_at || null,
+      }));
+
+    res.json({ status: 'ok', count: publicJobs.length, jobs: publicJobs });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Public Workers Feed (GET /api/public/workers)
+// Supports: ?skill=&location=&availableOnly=true
+app.get('/api/public/workers', async (req, res) => {
+  try {
+    const { skill, location, availableOnly } = req.query;
+    let query = supabase.from('workers').select('*');
+
+    if (availableOnly === 'true') query = query.eq('available', 1);
+    if (skill) query = query.eq('skill_type', skill);
+    if (location) query = query.eq('location', location);
+    query = query.order('available', { ascending: false }).order('id', { ascending: false }).limit(50);
+
+    const { data: rawWorkers, error } = await query;
+    if (error) throw error;
+
+    // Mask sensitive fields
+    const publicWorkers = (rawWorkers || []).map(w => ({
+      id: w.id,
+      display_name: maskName(w.name),
+      // phone_number intentionally omitted from public feed
+      skill_type: w.skill_type,
+      location: w.location,
+      available: w.available === 1 || w.available === true,
+      registered_at: w.registered_at || null,
+    }));
+
+    res.json({ status: 'ok', count: publicWorkers.length, workers: publicWorkers });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // 2. Public / Filtered Jobs Feed
 app.get('/api/jobs', async (req, res) => {
   try {
@@ -1021,29 +1121,67 @@ app.post('/employer/jobs/:id/cancel', async (req, res) => {
 });
 
 // Public Job Board (Digital Labor Chowk)
-app.get('/jobs', async (req, res) => {
+app.get(['/jobs', '/chowk-feed'], async (req, res) => {
   try {
-    const { skill, location } = req.query;
-    let query = supabase.from('jobs').select('*').eq('status', 'open');
+    const { tab = 'jobs', skill, location, minWage, maxWage, availableOnly } = req.query;
 
-    if (skill) {
-      query = query.eq('skill_needed', skill);
-    }
-    if (location) {
-      query = query.eq('location', location);
-    }
+    let jobsQuery = supabase.from('jobs').select('*').eq('status', 'open');
+    if (skill) jobsQuery = jobsQuery.eq('skill_needed', skill);
+    if (location) jobsQuery = jobsQuery.eq('location', location);
+    jobsQuery = jobsQuery.order('id', { ascending: false });
+    const { data: rawJobs, error: jobsErr } = await jobsQuery;
+    if (jobsErr) throw jobsErr;
 
-    query = query.order('id', { ascending: false });
-    const { data: jobs, error } = await query;
-    if (error) throw error;
+    const min = minWage ? parseInt(minWage) : null;
+    const max = maxWage ? parseInt(maxWage) : null;
+
+    const jobs = (rawJobs || [])
+      .filter(j => {
+        const wage = parseWage(j.wage_offered);
+        if (min !== null && wage < min) return false;
+        if (max !== null && wage > max) return false;
+        return true;
+      })
+      .map(j => ({
+        id: j.id,
+        employer_name: maskName(j.employer_name),
+        skill_needed: j.skill_needed,
+        location: j.location,
+        wage_offered: j.wage_offered,
+        date_needed: j.date_needed,
+        status: j.status,
+        created_at: j.created_at || null
+      }));
+
+    let workersQuery = supabase.from('workers').select('*');
+    if (availableOnly !== 'false') workersQuery = workersQuery.eq('available', 1);
+    if (skill) workersQuery = workersQuery.eq('skill_type', skill);
+    if (location) workersQuery = workersQuery.eq('location', location);
+    workersQuery = workersQuery.order('available', { ascending: false }).order('id', { ascending: false }).limit(50);
+    const { data: rawWorkers, error: workersErr } = await workersQuery;
+    if (workersErr) throw workersErr;
+
+    const workers = (rawWorkers || []).map(w => ({
+      id: w.id,
+      display_name: maskName(w.name),
+      skill_type: w.skill_type,
+      location: w.location,
+      available: w.available === 1 || w.available === true,
+      registered_at: w.registered_at || null
+    }));
 
     res.render('jobs-board', {
-      jobs: jobs || [],
+      jobs,
+      workers,
+      activeTab: tab,
       selectedSkill: skill || '',
-      selectedLocation: location || ''
+      selectedLocation: location || '',
+      minWage: minWage || '',
+      maxWage: maxWage || '',
+      availableOnly: availableOnly !== 'false'
     });
   } catch (err) {
-    console.error('Error fetching public jobs:', err);
+    console.error('Error fetching public jobs/workers:', err);
     res.status(500).send('Internal Server Error');
   }
 });

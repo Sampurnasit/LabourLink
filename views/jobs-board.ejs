@@ -1,95 +1,301 @@
-<%- include('partials/header', { title: 'Digital Labor Chowk — Public Job Board', activePage: 'jobs' }) %>
+<%- include('partials/header', { title: 'Labor Chowk – Real-Time Work & Skill Exchange', activePage: 'jobs' }) %>
 
-<div class="container" style="margin-top: 2rem;">
-  <div class="card" style="background: linear-gradient(135deg, #1e293b 0%, #334155 100%); color: white; border: none;">
-    <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 1rem;">
+<div class="container" style="margin-top: 2rem; margin-bottom: 5rem;">
+  <!-- Hero Banner -->
+  <div class="card" style="background: linear-gradient(135deg, #0f172a 0%, #1e3a8a 100%); color: white; border: none; padding: 2rem; border-radius: 18px; box-shadow: 0 10px 25px -5px rgba(30, 58, 138, 0.25);">
+    <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 1.25rem;">
       <div>
-        <span class="badge badge-wage" style="background: #f59e0b; color: #78350f;">Public Board</span>
-        <h1 style="font-size: 1.8rem; color: white; margin-top: 0.5rem;">Digital Labor Chowk</h1>
-        <p style="color: #cbd5e1; font-size: 0.95rem; margin-top: 0.25rem;">
-          Real-time stream of single-day & short-term labor openings across all neighborhoods.
+        <div style="display: inline-flex; align-items: center; gap: 6px; background: rgba(254, 243, 199, 0.18); border: 1px solid rgba(253, 230, 138, 0.3); border-radius: 20px; padding: 4px 12px; margin-bottom: 0.5rem;">
+          <span style="font-size: 0.8rem; font-weight: 700; color: #fde68a;">⚡ DIGITAL LABOR CHOWK</span>
+        </div>
+        <h1 style="font-size: 2rem; font-weight: 800; color: white; margin: 0.25rem 0 0.5rem 0; letter-spacing: -0.5px;">
+          Labor Chowk – Real-Time Work & Skill Exchange
+        </h1>
+        <p style="color: #93c5fd; font-size: 1rem; margin: 0; max-width: 650px; line-height: 1.5;">
+          Direct physical chowk experience brought online. Browse daily-wage openings, active work requests, and local skilled workers instantly without middleman cuts.
         </p>
       </div>
 
-      <div style="display: flex; gap: 0.75rem;">
-        <a href="/worker/register" class="btn btn-worker">Register to Apply</a>
-        <a href="/employer/post-job" class="btn btn-employer">+ Post a Job</a>
+      <div style="display: flex; gap: 0.75rem; flex-wrap: wrap;">
+        <button onclick="openAuthModal('worker')" class="btn btn-worker" style="display: flex; align-items: center; gap: 6px; padding: 0.75rem 1.25rem; font-weight: 700;">
+          <span>👷</span> List My Skills
+        </button>
+        <button onclick="openAuthModal('hirer')" class="btn btn-employer" style="display: flex; align-items: center; gap: 6px; padding: 0.75rem 1.25rem; font-weight: 700;">
+          <span>💼</span> Post a Requirement
+        </button>
       </div>
     </div>
   </div>
 
-  <!-- Filters -->
-  <div class="card" style="padding: 1.25rem;">
-    <form action="/jobs" method="GET" style="display: flex; gap: 1rem; flex-wrap: wrap; align-items: center;">
-      <div style="flex: 1; min-width: 180px;">
-        <label class="form-label" style="font-size: 0.8rem; margin-bottom: 0.2rem;">Filter by Skill</label>
+  <!-- Tabs Navigation -->
+  <div style="display: flex; gap: 0.5rem; margin: 1.5rem 0 1rem 0; border-bottom: 2px solid #e2e8f0; padding-bottom: 0.25rem;">
+    <a href="/jobs?tab=jobs<%= selectedSkill ? '&skill=' + encodeURIComponent(selectedSkill) : '' %><%= selectedLocation ? '&location=' + encodeURIComponent(selectedLocation) : '' %>"
+       style="padding: 0.75rem 1.5rem; font-weight: 700; font-size: 1rem; text-decoration: none; border-radius: 8px 8px 0 0; display: inline-flex; align-items: center; gap: 8px; border-bottom: 3px solid <%= activeTab === 'jobs' ? '#1e3a8a' : 'transparent' %>; color: <%= activeTab === 'jobs' ? '#1e3a8a' : '#64748b' %>; background: <%= activeTab === 'jobs' ? '#f8fafc' : 'transparent' %>;">
+      💼 Find Work (Open Jobs: <%= jobs.length %>)
+    </a>
+    <a href="/jobs?tab=workers<%= selectedSkill ? '&skill=' + encodeURIComponent(selectedSkill) : '' %><%= selectedLocation ? '&location=' + encodeURIComponent(selectedLocation) : '' %>"
+       style="padding: 0.75rem 1.5rem; font-weight: 700; font-size: 1rem; text-decoration: none; border-radius: 8px 8px 0 0; display: inline-flex; align-items: center; gap: 8px; border-bottom: 3px solid <%= activeTab === 'workers' ? '#0284c7' : 'transparent' %>; color: <%= activeTab === 'workers' ? '#0284c7' : '#64748b' %>; background: <%= activeTab === 'workers' ? '#f8fafc' : 'transparent' %>;">
+      👷 Find Daily Workers (Available: <%= workers.length %>)
+    </a>
+  </div>
+
+  <!-- Search & Filters -->
+  <div class="card" style="padding: 1.25rem; margin-bottom: 1.5rem; border-radius: 14px;">
+    <form action="/jobs" method="GET" style="display: flex; gap: 1rem; flex-wrap: wrap; align-items: flex-end;">
+      <input type="hidden" name="tab" value="<%= activeTab %>">
+
+      <div style="flex: 1; min-width: 170px;">
+        <label class="form-label" style="font-size: 0.8rem; font-weight: 600; margin-bottom: 0.3rem;">Skill / Trade</label>
         <select name="skill" class="form-control" onchange="this.form.submit()">
-          <option value="">All Skills</option>
-          <option value="Construction" <%= selectedSkill === 'Construction' ? 'selected' : '' %>>Construction</option>
+          <option value="">All Skills / Trades</option>
+          <option value="Construction" <%= selectedSkill === 'Construction' ? 'selected' : '' %>>Construction / Masonry</option>
           <option value="Painting" <%= selectedSkill === 'Painting' ? 'selected' : '' %>>Painting</option>
           <option value="Plumbing" <%= selectedSkill === 'Plumbing' ? 'selected' : '' %>>Plumbing</option>
-          <option value="Loading" <%= selectedSkill === 'Loading' ? 'selected' : '' %>>Loading</option>
+          <option value="Loading" <%= selectedSkill === 'Loading' ? 'selected' : '' %>>Loading / Unloading</option>
           <option value="Domestic Help" <%= selectedSkill === 'Domestic Help' ? 'selected' : '' %>>Domestic Help</option>
-          <option value="Other" <%= selectedSkill === 'Other' ? 'selected' : '' %>>Other</option>
+          <option value="Electrical" <%= selectedSkill === 'Electrical' ? 'selected' : '' %>>Electrical</option>
+          <option value="Masonry" <%= selectedSkill === 'Masonry' ? 'selected' : '' %>>Masonry</option>
+          <option value="Other" <%= selectedSkill === 'Other' ? 'selected' : '' %>>Other Daily Wage</option>
         </select>
       </div>
 
-      <div style="flex: 1; min-width: 180px;">
-        <label class="form-label" style="font-size: 0.8rem; margin-bottom: 0.2rem;">Filter by Area</label>
+      <div style="flex: 1; min-width: 170px;">
+        <label class="form-label" style="font-size: 0.8rem; font-weight: 600; margin-bottom: 0.3rem;">Area / Neighborhood</label>
         <select name="location" class="form-control" onchange="this.form.submit()">
-          <option value="">All Neighborhoods</option>
+          <option value="">All Areas / Chowks</option>
           <option value="Koramangala" <%= selectedLocation === 'Koramangala' ? 'selected' : '' %>>Koramangala</option>
           <option value="Indiranagar" <%= selectedLocation === 'Indiranagar' ? 'selected' : '' %>>Indiranagar</option>
           <option value="Whitefield" <%= selectedLocation === 'Whitefield' ? 'selected' : '' %>>Whitefield</option>
           <option value="HSR Layout" <%= selectedLocation === 'HSR Layout' ? 'selected' : '' %>>HSR Layout</option>
           <option value="Marathahalli" <%= selectedLocation === 'Marathahalli' ? 'selected' : '' %>>Marathahalli</option>
           <option value="Jayanagar" <%= selectedLocation === 'Jayanagar' ? 'selected' : '' %>>Jayanagar</option>
+          <option value="BTM Layout" <%= selectedLocation === 'BTM Layout' ? 'selected' : '' %>>BTM Layout</option>
         </select>
       </div>
 
-      <div style="margin-top: 1.25rem;">
-        <a href="/jobs" class="btn btn-outline btn-sm">Clear Filters</a>
+      <% if (activeTab === 'jobs') { %>
+        <div style="flex: 1; min-width: 130px;">
+          <label class="form-label" style="font-size: 0.8rem; font-weight: 600; margin-bottom: 0.3rem;">Min Daily Wage (₹)</label>
+          <input type="number" name="minWage" class="form-control" placeholder="Min ₹" value="<%= minWage %>" step="50" onchange="this.form.submit()">
+        </div>
+        <div style="flex: 1; min-width: 130px;">
+          <label class="form-label" style="font-size: 0.8rem; font-weight: 600; margin-bottom: 0.3rem;">Max Daily Wage (₹)</label>
+          <input type="number" name="maxWage" class="form-control" placeholder="Max ₹" value="<%= maxWage %>" step="50" onchange="this.form.submit()">
+        </div>
+      <% } else { %>
+        <div style="display: flex; align-items: center; gap: 8px; padding-bottom: 8px;">
+          <input type="checkbox" id="availToggle" name="availableOnly" value="true" <%= availableOnly ? 'checked' : '' %> onchange="this.form.submit()" style="width: 18px; height: 18px; accent-color: #059669; cursor: pointer;">
+          <label for="availToggle" style="font-size: 0.9rem; font-weight: 600; cursor: pointer; color: #059669;">Available Today Only</label>
+        </div>
+      <% } %>
+
+      <div>
+        <a href="/jobs?tab=<%= activeTab %>" class="btn btn-outline btn-sm" style="padding: 0.6rem 1rem;">Reset Filters</a>
       </div>
     </form>
   </div>
 
-  <!-- Job Feed -->
-  <div class="card">
-    <div class="card-header">
-      <h2 class="card-title">Open Jobs (<%= jobs.length %>)</h2>
-      <span class="badge badge-open">Live Feed</span>
+  <!-- TAB CONTENT -->
+  <% if (activeTab === 'jobs') { %>
+    <!-- OPEN JOBS LIST -->
+    <div class="card" style="border-radius: 14px; padding: 1.5rem;">
+      <div class="card-header" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.25rem;">
+        <h2 class="card-title" style="margin: 0; font-size: 1.3rem;">Open Daily Gigs (<%= jobs.length %>)</h2>
+        <span class="badge badge-open" style="background: #dcfce7; color: #15803d; font-weight: 700;">🟢 Live Public Feed</span>
+      </div>
+
+      <% if (jobs && jobs.length > 0) { %>
+        <div class="match-grid" style="display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 1.25rem;">
+          <% jobs.forEach(job => { %>
+            <div class="job-item-card" style="border: 1px solid #e2e8f0; border-radius: 14px; padding: 1.25rem; display: flex; flex-direction: column; justify-content: space-between; background: white; transition: transform 0.2s, box-shadow 0.2s;">
+              <div>
+                <div class="card-top" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.75rem;">
+                  <span class="badge badge-skill" style="background: #eef2ff; color: #3730a3; font-weight: 700;"><%= job.skill_needed %></span>
+                  <span class="badge badge-wage" style="background: #fef3c7; color: #92400e; font-weight: 800; font-size: 0.95rem;">₹ <%= job.wage_offered %></span>
+                </div>
+
+                <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 0.75rem;">
+                  <div style="width: 38px; height: 38px; border-radius: 50%; background: #eef2ff; color: #3730a3; display: flex; align-items: center; justify-content: center; font-weight: 800; font-size: 1rem;">
+                    <%= job.employer_name.charAt(0) %>
+                  </div>
+                  <div>
+                    <div style="font-weight: 700; color: #0f172a; font-size: 1rem;"><%= job.employer_name %></div>
+                    <div style="font-size: 0.75rem; color: #64748b;">Verified Hirer (Identity Masked)</div>
+                  </div>
+                </div>
+
+                <div class="card-meta" style="display: flex; gap: 0.5rem; flex-wrap: wrap; margin-bottom: 1rem;">
+                  <span class="badge badge-location" style="background: #f1f5f9; color: #475569;">📍 <%= job.location %></span>
+                  <span class="badge badge-open" style="background: #f1f5f9; color: #475569;">📅 Required: <%= job.date_needed %></span>
+                </div>
+              </div>
+
+              <div style="display: flex; gap: 0.5rem; margin-top: 0.75rem;">
+                <button onclick="openAuthModal('worker', 'Apply for <%= job.skill_needed %> job')" class="btn btn-primary" style="flex: 1; padding: 0.6rem; font-size: 0.88rem; font-weight: 700; background: #1e3a8a; border: none; color: white; border-radius: 8px;">
+                  ⚡ Apply for Job
+                </button>
+                <button onclick="openAuthModal('worker', 'Contact Hirer')" class="btn btn-outline" style="padding: 0.6rem 0.9rem; font-size: 0.88rem; font-weight: 600; border-radius: 8px;">
+                  📞 Contact
+                </button>
+              </div>
+            </div>
+          <% }) %>
+        </div>
+      <% } else { %>
+        <div style="text-align: center; padding: 4rem 1rem; color: #64748b;">
+          <div style="font-size: 3rem; margin-bottom: 0.75rem;">🔍</div>
+          <h3 style="font-size: 1.2rem; color: #334155;">No jobs found matching your criteria</h3>
+          <p style="margin-top: 0.25rem;">Try adjusting the skill or location filters to see more listings.</p>
+          <a href="/jobs?tab=jobs" class="btn btn-outline btn-sm" style="margin-top: 1rem;">Show All Jobs</a>
+        </div>
+      <% } %>
     </div>
 
-    <% if (jobs && jobs.length > 0) { %>
-      <div class="match-grid">
-        <% jobs.forEach(job => { %>
-          <div class="job-item-card">
-            <div>
-              <div class="card-top">
-                <span class="badge badge-skill"><%= job.skill_needed %></span>
-                <span class="badge badge-wage"><%= job.wage_offered %></span>
-              </div>
-              <div class="card-person-name" style="margin-top: 0.6rem;"><%= job.employer_name %></div>
-              <div class="card-meta">
-                <span class="badge badge-location">📍 <%= job.location %></span>
-                <span class="badge badge-open">📅 <%= job.date_needed %></span>
-              </div>
-            </div>
+  <% } else { %>
 
-            <div style="margin-top: 0.75rem;">
-              <a href="/worker/dashboard" class="btn btn-worker btn-block btn-sm">
-                Apply on Worker Portal →
-              </a>
+    <!-- AVAILABLE WORKERS LIST -->
+    <div class="card" style="border-radius: 14px; padding: 1.5rem;">
+      <div class="card-header" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.25rem;">
+        <h2 class="card-title" style="margin: 0; font-size: 1.3rem;">Available Daily Workers (<%= workers.length %>)</h2>
+        <span class="badge" style="background: #e0f2fe; color: #0369a1; font-weight: 700;">🟢 Ready for Daily Hire</span>
+      </div>
+
+      <% if (workers && workers.length > 0) { %>
+        <div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 1.25rem;">
+          <% workers.forEach(worker => { %>
+            <div style="border: 1px solid <%= worker.available ? 'rgba(16, 185, 129, 0.4)' : '#e2e8f0' %>; border-radius: 14px; padding: 1.25rem; display: flex; flex-direction: column; align-items: center; text-align: center; background: white; position: relative;">
+              
+              <!-- Avatar -->
+              <div style="position: relative; margin-bottom: 0.75rem;">
+                <div style="width: 58px; height: 58px; border-radius: 50%; background: #eef2ff; color: #3730a3; display: flex; align-items: center; justify-content: center; font-weight: 800; font-size: 1.3rem;">
+                  <%= worker.display_name.charAt(0) %>
+                </div>
+                <div style="position: absolute; bottom: 0; right: 0; width: 14px; height: 14px; border-radius: 50%; border: 2px solid white; background: <%= worker.available ? '#10b981' : '#94a3b8' %>;"></div>
+              </div>
+
+              <div style="font-weight: 700; color: #0f172a; font-size: 1.05rem;"><%= worker.display_name %></div>
+              
+              <div style="margin: 0.4rem 0;">
+                <span class="badge badge-skill" style="background: #eef2ff; color: #3730a3; font-weight: 700;"><%= worker.skill_type %></span>
+              </div>
+
+              <div style="font-size: 0.85rem; color: #64748b; margin-bottom: 0.75rem;">
+                📍 <%= worker.location %>
+              </div>
+
+              <div style="margin-bottom: 1rem;">
+                <span style="font-size: 0.75rem; font-weight: 700; padding: 3px 8px; border-radius: 12px; background: <%= worker.available ? '#d1fae5' : '#f1f5f9' %>; color: <%= worker.available ? '#065f46' : '#64748b' %>;">
+                  <%= worker.available ? '✓ Available Today' : 'Unavailable' %>
+                </span>
+              </div>
+
+              <button onclick="openAuthModal('hirer', 'Hire <%= worker.display_name %> (<%= worker.skill_type %>)')" class="btn" style="width: 100%; padding: 0.55rem; font-size: 0.88rem; font-weight: 700; background: #0891b2; color: white; border: none; border-radius: 8px;">
+                🤝 Hire / Contact
+              </button>
             </div>
-          </div>
-        <% }) %>
+          <% }) %>
+        </div>
+      <% } else { %>
+        <div style="text-align: center; padding: 4rem 1rem; color: #64748b;">
+          <div style="font-size: 3rem; margin-bottom: 0.75rem;">👷</div>
+          <h3 style="font-size: 1.2rem; color: #334155;">No workers found matching your criteria</h3>
+          <p style="margin-top: 0.25rem;">Try relaxing your skill or location filter.</p>
+          <a href="/jobs?tab=workers" class="btn btn-outline btn-sm" style="margin-top: 1rem;">Show All Workers</a>
+        </div>
+      <% } %>
+    </div>
+  <% } %>
+</div>
+
+<!-- FLOATING ACTION BUTTON -->
+<div style="position: fixed; bottom: 2rem; right: 2rem; z-index: 990;">
+  <% if (activeTab === 'jobs') { %>
+    <button onclick="openAuthModal('hirer', 'Post a Requirement')" style="background: linear-gradient(135deg, #1e3a8a 0%, #1e40af 100%); color: white; border: none; border-radius: 30px; padding: 0.9rem 1.5rem; font-size: 0.95rem; font-weight: 800; display: flex; align-items: center; gap: 8px; box-shadow: 0 10px 25px rgba(30, 58, 138, 0.4); cursor: pointer; transition: transform 0.2s;">
+      <span style="font-size: 1.2rem;">+</span> Post a Requirement
+    </button>
+  <% } else { %>
+    <button onclick="openAuthModal('worker', 'List My Skills')" style="background: linear-gradient(135deg, #ea580c 0%, #c2410c 100%); color: white; border: none; border-radius: 30px; padding: 0.9rem 1.5rem; font-size: 0.95rem; font-weight: 800; display: flex; align-items: center; gap: 8px; box-shadow: 0 10px 25px rgba(234, 88, 12, 0.4); cursor: pointer; transition: transform 0.2s;">
+      <span style="font-size: 1.2rem;">👷</span> List My Skills
+    </button>
+  <% } %>
+</div>
+
+<!-- AUTHENTICATION PROMPT MODAL -->
+<div id="authModal" style="display: none; position: fixed; inset: 0; background: rgba(15, 23, 42, 0.75); backdrop-filter: blur(4px); z-index: 1000; align-items: center; justify-content: center; padding: 1rem;">
+  <div style="background: #0f172a; border: 1px solid rgba(255, 255, 255, 0.1); border-radius: 20px; max-width: 480px; width: 100%; padding: 2rem; color: white; box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5); position: relative;">
+    <button onclick="closeAuthModal()" style="position: absolute; top: 1.25rem; right: 1.25rem; background: transparent; border: none; color: #94a3b8; font-size: 1.5rem; cursor: pointer;">&times;</button>
+    
+    <div style="width: 56px; height: 56px; border-radius: 50%; background: linear-gradient(135deg, #3b82f6, #1d4ed8); display: flex; align-items: center; justify-content: center; margin: 0 auto 1rem auto; font-size: 1.5rem;">
+      🔒
+    </div>
+
+    <h2 id="modalTitle" style="font-size: 1.35rem; font-weight: 800; text-align: center; margin: 0 0 0.5rem 0; color: white;">
+      Connect on LabourLink
+    </h2>
+    <p style="color: #94a3b8; font-size: 0.9rem; text-align: center; margin: 0 0 1.5rem 0;">
+      Log in or register as a Worker or Hirer to contact, apply, and confirm bookings directly.
+    </p>
+
+    <!-- Worker Option -->
+    <div style="background: rgba(249, 115, 22, 0.08); border: 1px solid rgba(249, 115, 22, 0.25); border-radius: 14px; padding: 1rem; margin-bottom: 0.75rem; display: flex; align-items: center; justify-content: space-between; gap: 0.75rem;">
+      <div style="display: flex; align-items: center; gap: 10px;">
+        <span style="font-size: 1.3rem;">👷</span>
+        <div>
+          <div style="font-weight: 700; color: white; font-size: 0.95rem;">I am a Worker</div>
+          <div style="font-size: 0.75rem; color: #cbd5e1;">Apply for jobs & get hired</div>
+        </div>
       </div>
-    <% } else { %>
-      <div style="text-align: center; padding: 3rem; color: var(--text-muted);">
-        No jobs found matching your filters.
+      <div style="display: flex; gap: 0.4rem;">
+        <a href="/worker/dashboard" class="btn" style="background: transparent; color: #f97316; border: 1px solid #f97316; font-size: 0.8rem; padding: 0.4rem 0.7rem; border-radius: 6px;">Login</a>
+        <a href="/worker/register" class="btn" style="background: #f97316; color: white; border: none; font-size: 0.8rem; padding: 0.4rem 0.7rem; border-radius: 6px; font-weight: 700;">Register</a>
       </div>
-    <% } %>
+    </div>
+
+    <!-- Hirer Option -->
+    <div style="background: rgba(6, 182, 212, 0.08); border: 1px solid rgba(6, 182, 212, 0.25); border-radius: 14px; padding: 1rem; margin-bottom: 1.25rem; display: flex; align-items: center; justify-content: space-between; gap: 0.75rem;">
+      <div style="display: flex; align-items: center; gap: 10px;">
+        <span style="font-size: 1.3rem;">💼</span>
+        <div>
+          <div style="font-weight: 700; color: white; font-size: 0.95rem;">I am a Hirer</div>
+          <div style="font-size: 0.75rem; color: #cbd5e1;">Post requirements & hire workers</div>
+        </div>
+      </div>
+      <div style="display: flex; gap: 0.4rem;">
+        <a href="/employer/dashboard" class="btn" style="background: transparent; color: #06b6d4; border: 1px solid #06b6d4; font-size: 0.8rem; padding: 0.4rem 0.7rem; border-radius: 6px;">Login</a>
+        <a href="/employer/post-job" class="btn" style="background: #06b6d4; color: white; border: none; font-size: 0.8rem; padding: 0.4rem 0.7rem; border-radius: 6px; font-weight: 700;">Post Job</a>
+      </div>
+    </div>
+
+    <div style="text-align: center;">
+      <button onclick="closeAuthModal()" style="background: transparent; border: none; color: #64748b; font-size: 0.85rem; cursor: pointer;">
+        Maybe later — continue browsing
+      </button>
+    </div>
   </div>
 </div>
+
+<script>
+function openAuthModal(role, actionText) {
+  const modal = document.getElementById('authModal');
+  const title = document.getElementById('modalTitle');
+  if (actionText) {
+    title.textContent = actionText;
+  } else {
+    title.textContent = role === 'worker' ? 'Sign in to List Your Skills' : 'Sign in to Post a Requirement';
+  }
+  modal.style.display = 'flex';
+}
+
+function closeAuthModal() {
+  document.getElementById('authModal').style.display = 'none';
+}
+
+window.onclick = function(event) {
+  const modal = document.getElementById('authModal');
+  if (event.target === modal) {
+    closeAuthModal();
+  }
+};
+</script>
 
 <%- include('partials/footer') %>

@@ -21,7 +21,12 @@ class ApiService {
     if (kIsWeb) {
       return 'http://localhost:3000';
     }
-    return 'http://127.0.0.1:3000';
+    switch (defaultTargetPlatform) {
+      case TargetPlatform.android:
+        return 'http://192.168.0.148:3000'; // Physical device: use PC's LAN IP
+      default:
+        return 'http://127.0.0.1:3000';
+    }
   }
 
   static String baseUrl = defaultBaseUrl;
@@ -163,7 +168,7 @@ class ApiService {
     }
   }
 
-  // 2. Open Jobs Feed
+  // 2. Open Jobs Feed (authenticated/internal)
   static Future<List<Job>> getJobs({String? skill, String? location}) async {
     try {
       final res = await _safeGet('/api/jobs', query: {
@@ -178,6 +183,61 @@ class ApiService {
       return [];
     } catch (e) {
       debugPrint('Error getting jobs: $e');
+      return [];
+    }
+  }
+
+  // 2a. Public Jobs Feed — masked data, no auth required
+  static Future<List<Job>> getPublicJobs({
+    String? skill,
+    String? location,
+    int? minWage,
+    int? maxWage,
+  }) async {
+    try {
+      final uri =
+          Uri.parse('$baseUrl/api/public/jobs').replace(queryParameters: {
+        if (skill != null && skill.isNotEmpty) 'skill': skill,
+        if (location != null && location.isNotEmpty) 'location': location,
+        if (minWage != null) 'minWage': '$minWage',
+        if (maxWage != null) 'maxWage': '$maxWage',
+      });
+
+      final res = await http.get(uri);
+      if (res.statusCode == 200) {
+        final data = jsonDecode(res.body);
+        final list = data['jobs'] as List? ?? [];
+        return list.map((j) => Job.fromJson(j)).toList();
+      }
+      return [];
+    } catch (e) {
+      debugPrint('Error getting public jobs: $e');
+      return [];
+    }
+  }
+
+  // 2b. Public Workers Feed — masked data, no auth required
+  static Future<List<Map<String, dynamic>>> getPublicWorkers({
+    String? skill,
+    String? location,
+    bool availableOnly = true,
+  }) async {
+    try {
+      final uri =
+          Uri.parse('$baseUrl/api/public/workers').replace(queryParameters: {
+        if (skill != null && skill.isNotEmpty) 'skill': skill,
+        if (location != null && location.isNotEmpty) 'location': location,
+        'availableOnly': availableOnly ? 'true' : 'false',
+      });
+
+      final res = await http.get(uri);
+      if (res.statusCode == 200) {
+        final data = jsonDecode(res.body);
+        return List<Map<String, dynamic>>.from(data['workers'] ?? []);
+      }
+      return [];
+    } catch (e) {
+      debugPrint('Error getting public workers: $e');
       return [];
     }
   }

@@ -1,11 +1,12 @@
 import 'package:flutter/material.dart';
-import 'package:google_fonts/google_fonts.dart';
+import '../i18n/i18n.dart';
+import '../widgets/language_selector.dart';
 import 'worker_register_screen.dart';
 import 'employer_post_job_screen.dart';
 import 'role_login_screen.dart';
 
 /// The initial landing screen presenting dual role-selection cards
-/// for Worker and Hirer. Does not affect any other screen.
+/// for Worker and Hirer. Supports multi-language internationalization (en/hi/bn).
 class LandingScreen extends StatefulWidget {
   const LandingScreen({super.key});
 
@@ -47,7 +48,7 @@ class _LandingScreenState extends State<LandingScreen>
   @override
   Widget build(BuildContext context) {
     final size = MediaQuery.of(context).size;
-    final isWide = size.width > 500;
+    final isWide = size.width > 600;
 
     return Scaffold(
       body: Container(
@@ -68,39 +69,46 @@ class _LandingScreenState extends State<LandingScreen>
               child: SingleChildScrollView(
                 padding: EdgeInsets.symmetric(
                   horizontal: isWide ? 40 : 20,
-                  vertical: 24,
+                  vertical: 16,
                 ),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.center,
                   children: [
-                    const SizedBox(height: 24),
+                    // ── Top Bar with Language Selector ────────────────────
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.end,
+                      children: const [
+                        LanguageSelector(),
+                      ],
+                    ),
+                    const SizedBox(height: 12),
 
                     // ── Logo + Title ──────────────────────────────────────
-                    _buildHeader(),
+                    _buildHeader(context),
 
                     const SizedBox(height: 12),
 
                     // Tagline
                     Text(
-                      'Instant short-term gig matching.\nNo middlemen. Just work.',
+                      context.tr('app.tagline'),
                       textAlign: TextAlign.center,
-                      style: GoogleFonts.plusJakartaSans(
+                      style: context.font(
                         color: const Color(0xFF94A3B8),
                         fontSize: 14,
                         height: 1.6,
                       ),
                     ),
 
-                    const SizedBox(height: 40),
+                    const SizedBox(height: 36),
 
                     // ── Dual Role Cards ───────────────────────────────────
                     Text(
-                      'Who are you?',
-                      style: GoogleFonts.plusJakartaSans(
-                        color: Colors.white.withValues(alpha: 0.5),
-                        fontSize: 12,
-                        fontWeight: FontWeight.w600,
-                        letterSpacing: 1.4,
+                      context.tr('landing.whoAreYou'),
+                      style: context.font(
+                        color: Colors.white.withValues(alpha: 0.6),
+                        fontSize: 13,
+                        fontWeight: FontWeight.w700,
+                        letterSpacing: 1.2,
                       ),
                     ),
                     const SizedBox(height: 16),
@@ -138,7 +146,7 @@ class _LandingScreenState extends State<LandingScreen>
     );
   }
 
-  Widget _buildHeader() {
+  Widget _buildHeader(BuildContext context) {
     return Column(
       children: [
         Container(
@@ -163,17 +171,17 @@ class _LandingScreenState extends State<LandingScreen>
         ),
         const SizedBox(height: 16),
         Text(
-          'LabourLink',
-          style: GoogleFonts.plusJakartaSans(
+          context.tr('app.name'),
+          style: context.font(
             color: Colors.white,
             fontSize: 32,
             fontWeight: FontWeight.w900,
             letterSpacing: -0.5,
           ),
         ),
-        const SizedBox(height: 6),
+        const SizedBox(height: 8),
         Container(
-          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
           decoration: BoxDecoration(
             color: const Color(0xFFFEF3C7).withValues(alpha: 0.15),
             borderRadius: BorderRadius.circular(20),
@@ -182,12 +190,12 @@ class _LandingScreenState extends State<LandingScreen>
             ),
           ),
           child: Text(
-            '⚡ CHOWK — Direct Labour Matching',
-            style: GoogleFonts.plusJakartaSans(
+            context.tr('app.taglineBadge'),
+            style: context.font(
               color: const Color(0xFFFDE68A),
-              fontSize: 11,
+              fontSize: 12,
               fontWeight: FontWeight.w700,
-              letterSpacing: 0.5,
+              letterSpacing: 0.4,
             ),
           ),
         ),
@@ -205,13 +213,16 @@ class _LandingScreenState extends State<LandingScreen>
         children: [
           const Icon(Icons.search, color: Color(0xFF64748B), size: 16),
           const SizedBox(width: 6),
-          Text(
-            'Browse open jobs without signing in',
-            style: GoogleFonts.plusJakartaSans(
-              color: const Color(0xFF64748B),
-              fontSize: 13,
-              decoration: TextDecoration.underline,
-              decorationColor: const Color(0xFF64748B),
+          Flexible(
+            child: Text(
+              context.tr('app.browseWithoutLogin'),
+              textAlign: TextAlign.center,
+              style: context.font(
+                color: const Color(0xFF64748B),
+                fontSize: 13,
+                decoration: TextDecoration.underline,
+                decorationColor: const Color(0xFF64748B),
+              ),
             ),
           ),
         ],
@@ -282,8 +293,9 @@ class _WorkerCardState extends State<_WorkerCard> {
 
               // Title
               Text(
-                "I'm a Worker",
-                style: GoogleFonts.plusJakartaSans(
+                context.tr('role.workerCardTitle'),
+                textAlign: TextAlign.center,
+                style: context.font(
                   color: Colors.white,
                   fontSize: 22,
                   fontWeight: FontWeight.w800,
@@ -291,10 +303,10 @@ class _WorkerCardState extends State<_WorkerCard> {
               ),
               const SizedBox(height: 8),
               Text(
-                'Find daily gigs, register skills & get hired today.',
+                context.tr('role.workerCardDesc'),
                 textAlign: TextAlign.center,
-                style: GoogleFonts.plusJakartaSans(
-                  color: Colors.white.withValues(alpha: 0.8),
+                style: context.font(
+                  color: Colors.white.withValues(alpha: 0.85),
                   fontSize: 13,
                   height: 1.4,
                 ),
@@ -304,7 +316,7 @@ class _WorkerCardState extends State<_WorkerCard> {
 
               // Log In button
               _CardButton(
-                label: 'Log In',
+                label: context.tr('action.logIn'),
                 icon: Icons.login_rounded,
                 onTap: () => widget.onNavigate(
                   const RoleLoginScreen(role: 'worker'),
@@ -317,9 +329,9 @@ class _WorkerCardState extends State<_WorkerCard> {
               GestureDetector(
                 onTap: () => widget.onNavigate(const WorkerRegisterScreen()),
                 child: Text(
-                  'or Register',
-                  style: GoogleFonts.plusJakartaSans(
-                    color: Colors.white.withValues(alpha: 0.85),
+                  context.tr('action.orRegister'),
+                  style: context.font(
+                    color: Colors.white.withValues(alpha: 0.9),
                     fontSize: 13,
                     fontWeight: FontWeight.w600,
                     decoration: TextDecoration.underline,
@@ -397,8 +409,9 @@ class _HirerCardState extends State<_HirerCard> {
 
               // Title
               Text(
-                "I'm a Hirer",
-                style: GoogleFonts.plusJakartaSans(
+                context.tr('role.hirerCardTitle'),
+                textAlign: TextAlign.center,
+                style: context.font(
                   color: Colors.white,
                   fontSize: 22,
                   fontWeight: FontWeight.w800,
@@ -406,10 +419,10 @@ class _HirerCardState extends State<_HirerCard> {
               ),
               const SizedBox(height: 8),
               Text(
-                'Post jobs, browse workers & confirm hires instantly.',
+                context.tr('role.hirerCardDesc'),
                 textAlign: TextAlign.center,
-                style: GoogleFonts.plusJakartaSans(
-                  color: Colors.white.withValues(alpha: 0.8),
+                style: context.font(
+                  color: Colors.white.withValues(alpha: 0.85),
                   fontSize: 13,
                   height: 1.4,
                 ),
@@ -419,7 +432,7 @@ class _HirerCardState extends State<_HirerCard> {
 
               // Log In button
               _CardButton(
-                label: 'Log In',
+                label: context.tr('action.logIn'),
                 icon: Icons.login_rounded,
                 onTap: () => widget.onNavigate(
                   const RoleLoginScreen(role: 'hirer'),
@@ -432,9 +445,9 @@ class _HirerCardState extends State<_HirerCard> {
               GestureDetector(
                 onTap: () => widget.onNavigate(const EmployerPostJobScreen()),
                 child: Text(
-                  'or Register',
-                  style: GoogleFonts.plusJakartaSans(
-                    color: Colors.white.withValues(alpha: 0.85),
+                  context.tr('action.orRegister'),
+                  style: context.font(
+                    color: Colors.white.withValues(alpha: 0.9),
                     fontSize: 13,
                     fontWeight: FontWeight.w600,
                     decoration: TextDecoration.underline,
@@ -473,7 +486,7 @@ class _CardButton extends StatelessWidget {
         icon: Icon(icon, size: 18),
         label: Text(
           label,
-          style: GoogleFonts.plusJakartaSans(
+          style: context.font(
             fontWeight: FontWeight.w700,
             fontSize: 15,
           ),

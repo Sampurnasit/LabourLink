@@ -7,8 +7,9 @@
   <meta name="description" content="Connecting daily-wage workers directly with local employers for short-term and single-day labor. Fast, transparent, and direct.">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+Bengali:wght@400;500;600;700&family=Noto+Sans+Devanagari:wght@400;500;600;700&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="/css/style.css">
+  <script src="/js/i18n.js" defer></script>
 </head>
 <body>
   <header class="navbar">
@@ -19,16 +20,25 @@
         <span class="brand-badge">Labor Chowk</span>
       </a>
 
-      <nav>
+      <nav style="display: flex; align-items: center; gap: 1rem;">
         <ul class="nav-links">
-          <li><a href="/" class="nav-link <%= typeof activePage !== 'undefined' && activePage === 'home' ? 'active' : '' %>" id="nav-home">Home</a></li>
-          <li><a href="/jobs" class="nav-link <%= typeof activePage !== 'undefined' && activePage === 'jobs' ? 'active' : '' %>" id="nav-public-jobs">Public Job Board</a></li>
-          <li><a href="/worker/dashboard" class="nav-link <%= typeof activePage !== 'undefined' && activePage === 'worker' ? 'active' : '' %>" id="nav-worker-dash">Worker Portal</a></li>
-          <li><a href="/employer/dashboard" class="nav-link <%= typeof activePage !== 'undefined' && activePage === 'employer' ? 'active' : '' %>" id="nav-employer-dash">Employer Portal</a></li>
-          <li><a href="/admin/voice" class="nav-link <%= typeof activePage !== 'undefined' && activePage === 'voice' ? 'active' : '' %>" id="nav-voice-dash">🎙️ Voice AI</a></li>
-          <li><a href="/app/" class="nav-link" style="color: #0284c7; font-weight: 700;" id="nav-flutter-app">📱 Flutter App</a></li>
-          <li><a href="/employer/post-job" class="btn btn-sm btn-primary nav-cta" id="nav-post-job-cta">+ Post a Job</a></li>
+          <li><a href="/" class="nav-link <%= typeof activePage !== 'undefined' && activePage === 'home' ? 'active' : '' %>" id="nav-home" data-i18n="nav.home">Home</a></li>
+          <li><a href="/jobs" class="nav-link <%= typeof activePage !== 'undefined' && activePage === 'jobs' ? 'active' : '' %>" id="nav-public-jobs" data-i18n="nav.jobs">Public Job Board</a></li>
+          <li><a href="/worker/dashboard" class="nav-link <%= typeof activePage !== 'undefined' && activePage === 'worker' ? 'active' : '' %>" id="nav-worker-dash" data-i18n="nav.workerPortal">Worker Portal</a></li>
+          <li><a href="/employer/dashboard" class="nav-link <%= typeof activePage !== 'undefined' && activePage === 'employer' ? 'active' : '' %>" id="nav-employer-dash" data-i18n="nav.employerPortal">Employer Portal</a></li>
+          <li><a href="/admin/voice" class="nav-link <%= typeof activePage !== 'undefined' && activePage === 'voice' ? 'active' : '' %>" id="nav-voice-dash" data-i18n="nav.voiceAI">🎙️ Voice AI</a></li>
+          <li><a href="/app/" class="nav-link" style="color: #0284c7; font-weight: 700;" id="nav-flutter-app" data-i18n="nav.flutterApp">📱 Flutter App</a></li>
+          <li><a href="/employer/post-job" class="btn btn-sm btn-primary nav-cta" id="nav-post-job-cta" data-i18n="nav.postJob">+ Post a Job</a></li>
         </ul>
+
+        <!-- Language Selector -->
+        <div class="lang-selector-container" style="display: inline-flex; align-items: center;">
+          <select class="lang-select-dropdown" aria-label="Language Selector" style="padding: 0.35rem 0.65rem; border-radius: 8px; border: 1px solid #cbd5e1; background: #ffffff; font-size: 0.85rem; font-weight: 600; cursor: pointer; color: #1e293b;">
+            <option value="en">English (English)</option>
+            <option value="hi">हिन्दी (Hindi)</option>
+            <option value="bn">বাংলা (Bengali)</option>
+          </select>
+        </div>
       </nav>
     </div>
   </header>

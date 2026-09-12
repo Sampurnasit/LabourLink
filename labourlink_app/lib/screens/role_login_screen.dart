@@ -1,9 +1,11 @@
 import 'package:flutter/material.dart';
-import 'package:google_fonts/google_fonts.dart';
+import '../i18n/i18n.dart';
+import '../widgets/language_selector.dart';
 import 'worker_dashboard_screen.dart';
 import 'employer_dashboard_screen.dart';
 
 /// Login screen that accepts a [role] of either 'worker' or 'hirer'.
+/// Supports multi-language internationalization (English, Hindi, Bengali).
 /// Navigates to the appropriate dashboard on successful login.
 class RoleLoginScreen extends StatefulWidget {
   final String role; // 'worker' | 'hirer'
@@ -28,8 +30,6 @@ class _RoleLoginScreenState extends State<RoleLoginScreen> {
 
   IconData get _roleIcon =>
       _isWorker ? Icons.engineering_rounded : Icons.business_center_rounded;
-
-  String get _roleLabel => _isWorker ? 'Worker' : 'Hirer';
 
   @override
   void dispose() {
@@ -77,16 +77,19 @@ class _RoleLoginScreenState extends State<RoleLoginScreen> {
         child: SafeArea(
           child: Column(
             children: [
-              // ── Back button row ─────────────────────────────────────────
+              // ── Header Row: Back Button & Language Selector ───────────
               Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
                 child: Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
                     IconButton(
                       icon: const Icon(Icons.arrow_back_ios_new_rounded,
                           color: Colors.white70, size: 20),
                       onPressed: () => Navigator.pop(context),
+                      tooltip: context.tr('action.back'),
                     ),
+                    const LanguageSelector(compact: true),
                   ],
                 ),
               ),
@@ -125,25 +128,30 @@ class _RoleLoginScreenState extends State<RoleLoginScreen> {
 
                         // ── Title ─────────────────────────────────────────
                         Text(
-                          '$_roleLabel Login',
-                          style: GoogleFonts.plusJakartaSans(
+                          _isWorker
+                              ? context.tr('login.workerTitle')
+                              : context.tr('login.hirerTitle'),
+                          textAlign: TextAlign.center,
+                          style: context.font(
                             color: Colors.white,
-                            fontSize: 28,
+                            fontSize: 26,
                             fontWeight: FontWeight.w800,
                           ),
                         ),
                         const SizedBox(height: 8),
                         Text(
-                          'Enter your registered phone number\nto access your $_roleLabel dashboard.',
+                          _isWorker
+                              ? context.tr('login.workerSubtitle')
+                              : context.tr('login.hirerSubtitle'),
                           textAlign: TextAlign.center,
-                          style: GoogleFonts.plusJakartaSans(
+                          style: context.font(
                             color: const Color(0xFF94A3B8),
                             fontSize: 14,
                             height: 1.5,
                           ),
                         ),
 
-                        const SizedBox(height: 36),
+                        const SizedBox(height: 32),
 
                         // ── Login Form ────────────────────────────────────
                         Container(
@@ -164,14 +172,19 @@ class _RoleLoginScreenState extends State<RoleLoginScreen> {
                                 TextFormField(
                                   controller: _phoneCtrl,
                                   keyboardType: TextInputType.phone,
-                                  style: GoogleFonts.plusJakartaSans(
+                                  style: context.font(
                                     color: Colors.white,
                                     fontSize: 15,
                                   ),
                                   decoration: InputDecoration(
-                                    labelText: 'Phone Number',
-                                    labelStyle: GoogleFonts.plusJakartaSans(
+                                    labelText: context.tr('login.phoneLabel'),
+                                    hintText: context.tr('login.phonePlaceholder'),
+                                    labelStyle: context.font(
                                       color: const Color(0xFF94A3B8),
+                                    ),
+                                    hintStyle: context.font(
+                                      color: const Color(0xFF64748B),
+                                      fontSize: 13,
                                     ),
                                     prefixIcon: Icon(
                                       Icons.phone_rounded,
@@ -199,16 +212,20 @@ class _RoleLoginScreenState extends State<RoleLoginScreen> {
                                       borderSide: const BorderSide(
                                           color: Colors.redAccent, width: 2),
                                     ),
+                                    errorStyle: context.font(
+                                      color: Colors.redAccent,
+                                      fontSize: 12,
+                                    ),
                                     filled: true,
                                     fillColor:
                                         Colors.white.withValues(alpha: 0.06),
                                   ),
                                   validator: (v) {
                                     if (v == null || v.trim().isEmpty) {
-                                      return 'Phone number is required';
+                                      return context.tr('validation.phoneRequired');
                                     }
                                     if (v.trim().length < 10) {
-                                      return 'Enter a valid phone number';
+                                      return context.tr('validation.phoneInvalid');
                                     }
                                     return null;
                                   },
@@ -243,9 +260,11 @@ class _RoleLoginScreenState extends State<RoleLoginScreen> {
                                             ),
                                           )
                                         : Text(
-                                            'Log In as $_roleLabel',
-                                            style:
-                                                GoogleFonts.plusJakartaSans(
+                                            _isWorker
+                                                ? context.tr('login.submitWorker')
+                                                : context.tr('login.submitHirer'),
+                                            textAlign: TextAlign.center,
+                                            style: context.font(
                                               fontWeight: FontWeight.w700,
                                               fontSize: 15,
                                             ),
@@ -271,8 +290,8 @@ class _RoleLoginScreenState extends State<RoleLoginScreen> {
                               padding:
                                   const EdgeInsets.symmetric(horizontal: 12),
                               child: Text(
-                                "Don't have an account?",
-                                style: GoogleFonts.plusJakartaSans(
+                                context.tr('login.noAccount'),
+                                style: context.font(
                                   color: const Color(0xFF64748B),
                                   fontSize: 12,
                                 ),
@@ -292,9 +311,9 @@ class _RoleLoginScreenState extends State<RoleLoginScreen> {
                         GestureDetector(
                           onTap: () => Navigator.pop(context),
                           child: Text(
-                            '← Go back and Register',
+                            context.tr('login.goBackRegister'),
                             textAlign: TextAlign.center,
-                            style: GoogleFonts.plusJakartaSans(
+                            style: context.font(
                               color: _accentColor,
                               fontSize: 14,
                               fontWeight: FontWeight.w600,

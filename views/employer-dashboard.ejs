@@ -133,14 +133,25 @@
                     </div>
 
                     <% if (job.status === 'open' && worker.status !== 'confirmed') { %>
-                      <form action="/employer/confirm-worker" method="POST" style="margin-top: 0.75rem;">
-                        <input type="hidden" name="job_id" value="<%= job.id %>">
-                        <input type="hidden" name="worker_id" value="<%= worker.worker_id %>">
-                        <input type="hidden" name="employer_phone" value="<%= phone %>">
-                        <button type="submit" class="btn btn-success btn-block btn-sm" id="btn-confirm-worker-<%= worker.worker_id %>">
-                          ✓ Confirm This Worker for Job
-                        </button>
-                      </form>
+                      <div style="display: flex; gap: 0.5rem; margin-top: 0.75rem;">
+                        <form action="/employer/reject-worker" method="POST" style="flex: 1;" onsubmit="return confirm('Pass on <%= worker.name %> for this job? They will no longer appear in this job listing.')">
+                          <input type="hidden" name="job_id" value="<%= job.id %>">
+                          <input type="hidden" name="worker_id" value="<%= worker.worker_id %>">
+                          <input type="hidden" name="employer_phone" value="<%= phone %>">
+                          <button type="submit" class="btn btn-outline btn-block btn-sm" style="color: #ef4444; border-color: #fca5a5;" id="btn-reject-worker-<%= worker.worker_id %>">
+                            ✕ Pass
+                          </button>
+                        </form>
+
+                        <form action="/employer/confirm-worker" method="POST" style="flex: 2;">
+                          <input type="hidden" name="job_id" value="<%= job.id %>">
+                          <input type="hidden" name="worker_id" value="<%= worker.worker_id %>">
+                          <input type="hidden" name="employer_phone" value="<%= phone %>">
+                          <button type="submit" class="btn btn-success btn-block btn-sm" id="btn-confirm-worker-<%= worker.worker_id %>">
+                            ✓ Confirm Hire
+                          </button>
+                        </form>
+                      </div>
                     <% } else if (worker.status === 'confirmed') { %>
                       <div style="text-align: center; font-size: 0.85rem; color: #047857; font-weight: 700; margin-top: 0.5rem;">
                         ✓ Worker Confirmed & Job Marked Filled!

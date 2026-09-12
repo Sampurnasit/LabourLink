@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'i18n/i18n.dart';
 import 'services/api_service.dart';
 import 'screens/home_screen.dart';
 import 'screens/landing_screen.dart';
@@ -10,6 +12,7 @@ import 'screens/public_board_screen.dart';
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await ApiService.init();
+  await I18n.init();
   runApp(const LabourLinkApp());
 }
 
@@ -47,19 +50,31 @@ class LabourLinkApp extends StatelessWidget {
       ),
     );
 
-    return MaterialApp(
-      title: 'LabourLink',
-      debugShowCheckedModeBanner: false,
-      theme: baseTheme.copyWith(
-        textTheme: GoogleFonts.plusJakartaSansTextTheme(baseTheme.textTheme),
-      ),
-      // Landing screen is shown first; '/app' takes the user into the main shell
-      initialRoute: '/landing',
-      routes: {
-        '/landing': (_) => const LandingScreen(),
-        '/app': (_) => const MainNavigationShell(),
-        '/jobs': (_) => const PublicBoardScreen(),
-        '/chowk-feed': (_) => const PublicBoardScreen(),
+    return ValueListenableBuilder<Locale>(
+      valueListenable: I18n.currentLocaleNotifier,
+      builder: (context, currentLocale, _) {
+        return MaterialApp(
+          title: 'LabourLink',
+          debugShowCheckedModeBanner: false,
+          locale: currentLocale,
+          supportedLocales: I18n.supportedLocales,
+          localizationsDelegates: const [
+            GlobalMaterialLocalizations.delegate,
+            GlobalWidgetsLocalizations.delegate,
+            GlobalCupertinoLocalizations.delegate,
+          ],
+          theme: baseTheme.copyWith(
+            textTheme: GoogleFonts.plusJakartaSansTextTheme(baseTheme.textTheme),
+          ),
+          // Landing screen is shown first; '/app' takes the user into the main shell
+          initialRoute: '/landing',
+          routes: {
+            '/landing': (_) => const LandingScreen(),
+            '/app': (_) => const MainNavigationShell(),
+            '/jobs': (_) => const PublicBoardScreen(),
+            '/chowk-feed': (_) => const PublicBoardScreen(),
+          },
+        );
       },
     );
   }
@@ -120,4 +135,3 @@ class _MainNavigationShellState extends State<MainNavigationShell> {
     );
   }
 }
-

@@ -1,0 +1,47 @@
+{
+  "nav": {
+    "home": "Home",
+    "jobs": "Public Job Board",
+    "workerPortal": "Worker Portal",
+    "employerPortal": "Employer Portal",
+    "flutterApp": "📱 Flutter App",
+    "postJob": "+ Post a Job"
+  },
+  "hero": {
+    "badge": "⚡ Direct One-Day Labor Matching",
+    "title": "Connecting Daily-Wage Workers With Local Employers.",
+    "titleHighlight": "Instantly.",
+    "subtitle": "No middleman cuts, no waiting at physical crossroads. Post a 1-day job or register your skills to match directly on the digital labor chowk."
+  },
+  "roles": {
+    "workerTitle": "I'm Looking for Work",
+    "workerDesc": "Register your skill (Construction, Painting, Plumbing, Loading, Domestic Help), indicate if you're available today, and receive instant matched job offers near you.",
+    "workerRegisterBtn": "Register as a Worker",
+    "workerDashBtn": "Open Worker Dashboard",
+    "hirerTitle": "I Need to Hire Someone",
+    "hirerDesc": "Need short-term help today or tomorrow? Post your requirement with your wage offer and location. Instantly see available workers and contact them directly.",
+    "hirerPostBtn": "Post a 1-Day Job",
+    "hirerDashBtn": "Open Employer Dashboard"
+  },
+  "login": {
+    "workerTitle": "Worker Login",
+    "hirerTitle": "Hirer Login",
+    "workerSubtitle": "Enter your registered phone number to access your Worker dashboard.",
+    "hirerSubtitle": "Enter your registered phone number to access your Hirer dashboard.",
+    "phoneLabel": "Phone Number",
+    "phonePlaceholder": "Enter 10-digit phone number",
+    "submitWorker": "Log In as Worker",
+    "submitHirer": "Log In as Hirer",
+    "loggingIn": "Logging in...",
+    "noAccount": "Don't have an account?",
+    "register": "Register",
+    "forgotNumber": "Forgot registered number?",
+    "helpText": "We will verify your profile using your phone number."
+  },
+  "language": {
+    "select": "Language",
+    "en": "English",
+    "hi": "हिन्दी",
+    "bn": "বাংলা"
+  }
+}

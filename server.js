@@ -403,7 +403,7 @@ app.get('/api/jobs/:id/matches', async (req, res) => {
       return res.status(404).json({ error: 'Job not found' });
     }
 
-    // Direct matches: same skill + same location
+    // Direct matches: same skill + same location (excluding workers rejected for this job)
     const matchedWorkers = await db.allAsync(
       `SELECT w.*, 
               (CASE WHEN w.status = 'HIRED' OR w.current_active_job_id IS NOT NULL THEN 1 ELSE 0 END) as is_hired_by_other,
@@ -413,11 +413,16 @@ app.get('/api/jobs/:id/matches', async (req, res) => {
               COALESCE((SELECT COUNT(*) > 0 FROM worker_cv WHERE worker_id = w.id), 0) as has_cv
        FROM workers w
        WHERE w.skill_type = ? AND w.location = ?
+         AND w.id NOT IN (
+           SELECT worker_id FROM job_rejections WHERE job_id = ?
+           UNION
+           SELECT worker_id FROM job_interests WHERE job_id = ? AND status = 'rejected'
+         )
        ORDER BY (CASE WHEN w.status = 'HIRED' OR w.current_active_job_id IS NOT NULL THEN 1 ELSE 0 END), w.id DESC`,
-      [job.skill_needed, job.location]
+      [job.skill_needed, job.location, job.id, job.id]
     );
 
-    // Nearby citywide workers with same skill
+    // Nearby citywide workers with same skill (excluding workers rejected for this job)
     const nearbyWorkers = await db.allAsync(
       `SELECT w.*, 
               (CASE WHEN w.status = 'HIRED' OR w.current_active_job_id IS NOT NULL THEN 1 ELSE 0 END) as is_hired_by_other,
@@ -427,8 +432,13 @@ app.get('/api/jobs/:id/matches', async (req, res) => {
               COALESCE((SELECT COUNT(*) > 0 FROM worker_cv WHERE worker_id = w.id), 0) as has_cv
        FROM workers w
        WHERE w.skill_type = ? AND w.location != ?
+         AND w.id NOT IN (
+           SELECT worker_id FROM job_rejections WHERE job_id = ?
+           UNION
+           SELECT worker_id FROM job_interests WHERE job_id = ? AND status = 'rejected'
+         )
        ORDER BY (CASE WHEN w.status = 'HIRED' OR w.current_active_job_id IS NOT NULL THEN 1 ELSE 0 END), w.id DESC LIMIT 5`,
-      [job.skill_needed, job.location]
+      [job.skill_needed, job.location, job.id, job.id]
     );
 
     res.json({
@@ -618,25 +628,35 @@ app.get('/api/workers/:phone', async (req, res) => {
       cv = { ...cvRecord, skills, previous_work };
     }
 
-    // Matched open jobs in worker's area
+    // Matched open jobs in worker's area (excluding jobs already applied to or rejected from)
     const matchedJobs = await db.allAsync(
       `SELECT * FROM jobs 
        WHERE skill_needed = ? AND location = ? AND status = 'open' 
+         AND id NOT IN (
+           SELECT job_id FROM job_rejections WHERE worker_id = ?
+           UNION
+           SELECT job_id FROM job_interests WHERE worker_id = ?
+         )
        ORDER BY id DESC`,
-      [worker.skill_type, worker.location]
+      [worker.skill_type, worker.location, worker.id, worker.id]
     );
 
-    // Other open jobs in that skill citywide
+    // Other open jobs in that skill citywide (excluding jobs already applied to or rejected from)
     const otherSkillJobs = await db.allAsync(
       `SELECT * FROM jobs 
        WHERE skill_needed = ? AND location != ? AND status = 'open' 
+         AND id NOT IN (
+           SELECT job_id FROM job_rejections WHERE worker_id = ?
+           UNION
+           SELECT job_id FROM job_interests WHERE worker_id = ?
+         )
        ORDER BY id DESC LIMIT 6`,
-      [worker.skill_type, worker.location]
+      [worker.skill_type, worker.location, worker.id, worker.id]
     );
 
-    // Jobs the worker has applied for or been confirmed for
+    // Jobs the worker has applied for, been confirmed for, or rejected from (retains transparent history)
     const appliedJobs = await db.allAsync(
-      `SELECT j.*, ji.status as interest_status, ji.created_at as interest_date
+      `SELECT j.*, ji.status as interest_status, ji.reason, ji.rejected_at, ji.created_at as interest_date
        FROM job_interests ji
        JOIN jobs j ON ji.job_id = j.id
        WHERE ji.worker_id = ?
@@ -710,7 +730,7 @@ app.post('/api/workers/toggle-availability', async (req, res) => {
   }
 });
 
-// 9. Employer Dashboard Jobs & Interested Applicants
+// 9. Employer Dashboard Jobs & Interested Applicants (excludes workers rejected for that specific job)
 app.get('/api/employers/:phone/jobs', async (req, res) => {
   try {
     const phone = cleanPhone(req.params.phone);
@@ -721,13 +741,13 @@ app.get('/api/employers/:phone/jobs', async (req, res) => {
 
     for (const job of jobs) {
       const interestedWorkers = await db.allAsync(
-        `SELECT w.id as worker_id, w.name, w.phone_number, w.skill_type, w.location, w.available, ji.status,
+        `SELECT w.id as worker_id, w.name, w.phone_number, w.skill_type, w.location, w.available, ji.status, ji.reason, ji.created_at,
                 COALESCE((SELECT ROUND(AVG(rating), 1) FROM worker_ratings WHERE worker_id = w.id), 0.0) as avg_rating,
                 COALESCE((SELECT COUNT(*) FROM worker_ratings WHERE worker_id = w.id), 0) as rating_count,
                 COALESCE((SELECT COUNT(*) > 0 FROM worker_cv WHERE worker_id = w.id), 0) as has_cv
          FROM job_interests ji
          JOIN workers w ON ji.worker_id = w.id
-         WHERE ji.job_id = ?
+         WHERE ji.job_id = ? AND ji.status != 'rejected'
          ORDER BY (CASE WHEN ji.status = 'confirmed' THEN 0 ELSE 1 END), ji.id DESC`,
         [job.id]
       );
@@ -771,6 +791,112 @@ app.post('/api/employers/confirm-worker', async (req, res) => {
     res.json({ status: 'ok', message: 'Worker confirmed and assigned to active job' });
   } catch (err) {
     res.status(500).json({ error: err.message });
+  }
+});
+
+// 10b. Employer Reject Worker for a Specific Job
+app.post(['/api/employers/reject-worker', '/api/jobs/:jobId/workers/:workerId/reject', '/api/jobs/:jobId/reject-worker'], async (req, res) => {
+  try {
+    const jobId = req.params.jobId || req.body.job_id;
+    const workerId = req.params.workerId || req.body.worker_id;
+    const reason = req.body.reason || null;
+    let employerPhone = req.body.employer_phone ? cleanPhone(req.body.employer_phone) : null;
+
+    if (!jobId || !workerId) {
+      return res.status(400).json({ success: false, error: 'job_id and worker_id are required' });
+    }
+
+    const job = await db.getAsync('SELECT * FROM jobs WHERE id = ?', [jobId]);
+    if (!job) {
+      return res.status(404).json({ success: false, error: 'Job not found' });
+    }
+
+    if (!employerPhone) {
+      employerPhone = job.employer_phone;
+    }
+
+    // 1. Record rejection in job_rejections table (indexed by job_id & worker_id)
+    await db.runAsync(
+      `INSERT INTO job_rejections (hirer_phone, job_id, worker_id, reason, rejected_at)
+       VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
+       ON CONFLICT(job_id, worker_id) DO UPDATE SET reason = excluded.reason, rejected_at = CURRENT_TIMESTAMP`,
+      [employerPhone, jobId, workerId, reason]
+    );
+
+    // 2. Set status to 'rejected' in job_interests
+    await db.runAsync(
+      `INSERT INTO job_interests (job_id, worker_id, status, reason, rejected_at)
+       VALUES (?, ?, 'rejected', ?, CURRENT_TIMESTAMP)
+       ON CONFLICT(job_id, worker_id) DO UPDATE SET status = 'rejected', reason = excluded.reason, rejected_at = CURRENT_TIMESTAMP`,
+      [jobId, workerId, reason]
+    );
+
+    // 3. Sync to Supabase if configured
+    if (supabase) {
+      try {
+        await supabase
+          .from('job_rejections')
+          .upsert([
+            {
+              hirer_phone: employerPhone,
+              job_id: Number(jobId),
+              worker_id: Number(workerId),
+              reason: reason,
+              rejected_at: new Date().toISOString()
+            }
+          ], { onConflict: 'job_id,worker_id' });
+
+        await supabase
+          .from('job_interests')
+          .upsert([
+            {
+              job_id: Number(jobId),
+              worker_id: Number(workerId),
+              status: 'rejected',
+              reason: reason,
+              rejected_at: new Date().toISOString()
+            }
+          ], { onConflict: 'job_id,worker_id' });
+      } catch (sbErr) {
+        console.warn('Supabase rejection sync note:', sbErr.message);
+      }
+    }
+
+    res.status(200).json({
+      success: true,
+      status: 'ok',
+      message: 'Worker rejected for this specific job successfully.',
+      job_id: Number(jobId),
+      worker_id: Number(workerId)
+    });
+  } catch (err) {
+    console.error('Error rejecting worker:', err);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// 10c. Undo Worker Rejection (Optional)
+app.post(['/api/employers/unreject-worker', '/api/jobs/:jobId/workers/:workerId/unreject'], async (req, res) => {
+  try {
+    const jobId = req.params.jobId || req.body.job_id;
+    const workerId = req.params.workerId || req.body.worker_id;
+
+    if (!jobId || !workerId) {
+      return res.status(400).json({ success: false, error: 'job_id and worker_id are required' });
+    }
+
+    await db.runAsync('DELETE FROM job_rejections WHERE job_id = ? AND worker_id = ?', [jobId, workerId]);
+    await db.runAsync("UPDATE job_interests SET status = 'interested', reason = NULL WHERE job_id = ? AND worker_id = ? AND status = 'rejected'", [jobId, workerId]);
+
+    if (supabase) {
+      try {
+        await supabase.from('job_rejections').delete().match({ job_id: jobId, worker_id: workerId });
+      } catch (_) {}
+    }
+
+    res.status(200).json({ success: true, status: 'ok', message: 'Rejection removed successfully' });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
   }
 });
 
@@ -838,21 +964,56 @@ app.post('/api/jobs/:id/cancel', async (req, res) => {
 });
 
 // 13. Get Worker CV (Structured form data)
-app.get('/api/workers/:id/cv', async (req, res) => {
+// 13. Get Worker CV (Structured Form Data)
+app.get(['/api/workers/:id/cv', '/api/workers/cv/:id'], async (req, res) => {
   try {
-    const workerId = req.params.id;
-    const worker = await db.getAsync(
-      `SELECT w.*,
-              COALESCE((SELECT ROUND(AVG(rating), 1) FROM worker_ratings WHERE worker_id = w.id), 0.0) as avg_rating,
-              COALESCE((SELECT COUNT(*) FROM worker_ratings WHERE worker_id = w.id), 0) as rating_count
-       FROM workers w WHERE w.id = ?`,
-      [workerId]
-    );
+    const rawId = req.params.id;
+    let worker = null;
+    if (/^\d{10}$/.test(rawId)) {
+      worker = await db.getAsync(
+        `SELECT w.*,
+                COALESCE((SELECT ROUND(AVG(rating), 1) FROM worker_ratings WHERE worker_id = w.id), 0.0) as avg_rating,
+                COALESCE((SELECT COUNT(*) FROM worker_ratings WHERE worker_id = w.id), 0) as rating_count
+         FROM workers w WHERE w.phone_number = ?`,
+        [cleanPhone(rawId)]
+      );
+    } else {
+      const workerId = parseInt(rawId, 10);
+      if (!isNaN(workerId) && workerId > 0) {
+        worker = await db.getAsync(
+          `SELECT w.*,
+                  COALESCE((SELECT ROUND(AVG(rating), 1) FROM worker_ratings WHERE worker_id = w.id), 0.0) as avg_rating,
+                  COALESCE((SELECT COUNT(*) FROM worker_ratings WHERE worker_id = w.id), 0) as rating_count
+           FROM workers w WHERE w.id = ?`,
+          [workerId]
+        );
+      }
+    }
+
+    if (!worker && supabase) {
+      try {
+        let query = supabase.from('workers').select('*');
+        if (/^\d{10}$/.test(rawId)) {
+          query = query.eq('phone_number', cleanPhone(rawId));
+        } else {
+          query = query.eq('id', parseInt(rawId, 10));
+        }
+        const { data: sbW } = await query.maybeSingle();
+        if (sbW) {
+          await db.runAsync(
+            'INSERT OR IGNORE INTO workers (id, name, phone_number, skill_type, location, available) VALUES (?, ?, ?, ?, ?, ?)',
+            [sbW.id, sbW.name, sbW.phone_number, sbW.skill_type, sbW.location, sbW.available ? 1 : 0]
+          );
+          worker = sbW;
+        }
+      } catch (_) {}
+    }
+
     if (!worker) {
       return res.status(404).json({ error: 'Worker not found' });
     }
 
-    const cv = await db.getAsync('SELECT * FROM worker_cv WHERE worker_id = ?', [workerId]);
+    const cv = await db.getAsync('SELECT * FROM worker_cv WHERE worker_id = ?', [worker.id]);
     if (!cv) {
       return res.json({
         status: 'ok',
@@ -883,12 +1044,56 @@ app.get('/api/workers/:id/cv', async (req, res) => {
 });
 
 // 14. Save / Update Worker CV (Structured Form Submission)
-app.post('/api/workers/:id/cv', async (req, res) => {
+app.post(['/api/workers/:id/cv', '/api/workers/cv'], async (req, res) => {
   try {
-    const workerId = parseInt(req.params.id, 10);
-    const worker = await db.getAsync('SELECT id, name, phone_number FROM workers WHERE id = ?', [workerId]);
+    const rawId = req.params.id || req.body.worker_id;
+    const phone = req.body.phone_number ? cleanPhone(req.body.phone_number) : null;
+
+    let worker = null;
+    if (rawId && rawId !== '0' && rawId !== 0) {
+      if (/^\d{10}$/.test(String(rawId))) {
+        worker = await db.getAsync('SELECT id, name, phone_number FROM workers WHERE phone_number = ?', [cleanPhone(String(rawId))]);
+      } else {
+        const workerId = parseInt(rawId, 10);
+        if (!isNaN(workerId) && workerId > 0) {
+          worker = await db.getAsync('SELECT id, name, phone_number FROM workers WHERE id = ?', [workerId]);
+        }
+      }
+    }
+
+    if (!worker && phone) {
+      worker = await db.getAsync('SELECT id, name, phone_number FROM workers WHERE phone_number = ?', [phone]);
+    }
+
+    if (!worker && supabase && (phone || rawId)) {
+      try {
+        let query = supabase.from('workers').select('*');
+        if (phone) {
+          query = query.eq('phone_number', phone);
+        } else if (rawId) {
+          query = query.eq('id', parseInt(rawId, 10));
+        }
+        const { data: sbW } = await query.maybeSingle();
+        if (sbW) {
+          await db.runAsync(
+            'INSERT OR IGNORE INTO workers (id, name, phone_number, skill_type, location, available) VALUES (?, ?, ?, ?, ?, ?)',
+            [sbW.id, sbW.name, sbW.phone_number, sbW.skill_type, sbW.location, sbW.available ? 1 : 0]
+          );
+          worker = sbW;
+        }
+      } catch (_) {}
+    }
+
     if (!worker) {
-      return res.status(404).json({ error: 'Worker not found' });
+      if (phone && req.body.full_name) {
+        const ins = await db.runAsync(
+          'INSERT INTO workers (name, phone_number, skill_type, location, available) VALUES (?, ?, ?, ?, 1)',
+          [req.body.full_name.trim(), phone, req.body.skills ? (Array.isArray(req.body.skills) ? req.body.skills[0] : req.body.skills) : 'General', req.body.work_location || 'Citywide']
+        );
+        worker = await db.getAsync('SELECT id, name, phone_number FROM workers WHERE id = ?', [ins.lastID]);
+      } else {
+        return res.status(404).json({ error: 'Worker not found. Please register as a worker first.' });
+      }
     }
 
     const {
@@ -933,7 +1138,7 @@ app.post('/api/workers/:id/cv', async (req, res) => {
          about_me = excluded.about_me,
          updated_at = CURRENT_TIMESTAMP`,
       [
-        workerId,
+        worker.id,
         full_name.trim(),
         dob_or_age || '',
         cleanPhone(phone_number) || worker.phone_number,
@@ -948,11 +1153,40 @@ app.post('/api/workers/:id/cv', async (req, res) => {
       ]
     );
 
+    if (supabase) {
+      try {
+        await supabase
+          .from('worker_cv')
+          .upsert([
+            {
+              worker_id: worker.id,
+              full_name: full_name.trim(),
+              dob_or_age: dob_or_age || '',
+              phone_number: cleanPhone(phone_number) || worker.phone_number,
+              skills: skillsJson,
+              years_of_experience: yoe,
+              previous_work: prevWorkJson,
+              work_location: work_location || '',
+              daily_wage_expectation: daily_wage_expectation || '',
+              availability_type: availability_type || 'Full-time',
+              languages: languages || '',
+              about_me: about_me || '',
+              updated_at: new Date().toISOString()
+            }
+          ], { onConflict: 'worker_id' });
+      } catch (sbErr) {
+        console.warn('Supabase worker_cv sync note:', sbErr.message);
+      }
+    }
+
     res.json({
       status: 'ok',
-      message: 'Worker CV saved successfully'
+      success: true,
+      message: 'Worker CV saved successfully',
+      worker_id: worker.id
     });
   } catch (err) {
+    console.error('Error saving CV:', err);
     res.status(500).json({ error: err.message });
   }
 });
@@ -1314,7 +1548,7 @@ app.get('/employer/post-success/:id', async (req, res) => {
       return res.status(404).send('Job not found');
     }
 
-    // Direct matches with is_hired_by_other indicator and ratings
+    // Direct matches with is_hired_by_other indicator and ratings (excluding workers rejected for this job)
     const matchedWorkers = await db.allAsync(
       `SELECT w.*, 
               (CASE WHEN w.status = 'HIRED' OR w.current_active_job_id IS NOT NULL THEN 1 ELSE 0 END) as is_hired_by_other,
@@ -1324,8 +1558,13 @@ app.get('/employer/post-success/:id', async (req, res) => {
               COALESCE((SELECT COUNT(*) > 0 FROM worker_cv WHERE worker_id = w.id), 0) as has_cv
        FROM workers w 
        WHERE skill_type = ? AND location = ? 
+         AND id NOT IN (
+           SELECT worker_id FROM job_rejections WHERE job_id = ?
+           UNION
+           SELECT worker_id FROM job_interests WHERE job_id = ? AND status = 'rejected'
+         )
        ORDER BY (CASE WHEN w.status = 'HIRED' OR w.current_active_job_id IS NOT NULL THEN 1 ELSE 0 END), id DESC`,
-      [job.skill_needed, job.location]
+      [job.skill_needed, job.location, job.id, job.id]
     );
 
     const nearbyWorkers = await db.allAsync(
@@ -1337,8 +1576,13 @@ app.get('/employer/post-success/:id', async (req, res) => {
               COALESCE((SELECT COUNT(*) > 0 FROM worker_cv WHERE worker_id = w.id), 0) as has_cv
        FROM workers w 
        WHERE skill_type = ? AND location != ? 
+         AND id NOT IN (
+           SELECT worker_id FROM job_rejections WHERE job_id = ?
+           UNION
+           SELECT worker_id FROM job_interests WHERE job_id = ? AND status = 'rejected'
+         )
        ORDER BY (CASE WHEN w.status = 'HIRED' OR w.current_active_job_id IS NOT NULL THEN 1 ELSE 0 END), id DESC LIMIT 4`,
-      [job.skill_needed, job.location]
+      [job.skill_needed, job.location, job.id, job.id]
     );
 
     res.render('employer-post-success', {
@@ -1361,6 +1605,8 @@ app.get('/employer/dashboard', async (req, res) => {
 
     if (req.query.confirmed) {
       successMessage = 'Worker confirmed successfully! The job has been marked filled.';
+    } else if (req.query.rejected) {
+      successMessage = 'Worker passed/rejected for this job. They will no longer appear in this job listing.';
     } else if (req.query.completed) {
       successMessage = 'Job marked completed and labourer released back to available pool.';
     } else if (req.query.cancelled) {
@@ -1389,7 +1635,7 @@ app.get('/employer/dashboard', async (req, res) => {
                 COALESCE((SELECT COUNT(*) > 0 FROM worker_cv WHERE worker_id = w.id), 0) as has_cv
          FROM job_interests ji
          JOIN workers w ON ji.worker_id = w.id
-         WHERE ji.job_id = ?
+         WHERE ji.job_id = ? AND ji.status != 'rejected'
          ORDER BY (CASE WHEN ji.status = 'confirmed' THEN 0 ELSE 1 END), ji.id DESC`,
         [job.id]
       );
@@ -1440,6 +1686,40 @@ app.post('/employer/confirm-worker', async (req, res) => {
   } catch (err) {
     console.error('Error confirming worker:', err);
     res.redirect(`/employer/dashboard?phone=${encodeURIComponent(req.body.employer_phone || '')}`);
+  }
+});
+
+// Reject / Pass Worker for a Specific Job (Web Form)
+app.post('/employer/reject-worker', async (req, res) => {
+  try {
+    const { job_id, worker_id, employer_phone, reason, redirect_to } = req.body;
+    const phone = cleanPhone(employer_phone);
+    if (!job_id || !worker_id) {
+      return res.redirect(`/employer/dashboard?phone=${encodeURIComponent(phone)}&error=Missing+parameters`);
+    }
+
+    await db.runAsync(
+      `INSERT INTO job_rejections (hirer_phone, job_id, worker_id, reason, rejected_at)
+       VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
+       ON CONFLICT(job_id, worker_id) DO UPDATE SET reason = excluded.reason, rejected_at = CURRENT_TIMESTAMP`,
+      [phone || null, job_id, worker_id, reason || null]
+    );
+
+    await db.runAsync(
+      `INSERT INTO job_interests (job_id, worker_id, status, reason, rejected_at)
+       VALUES (?, ?, 'rejected', ?, CURRENT_TIMESTAMP)
+       ON CONFLICT(job_id, worker_id) DO UPDATE SET status = 'rejected', reason = excluded.reason, rejected_at = CURRENT_TIMESTAMP`,
+      [job_id, worker_id, reason || null]
+    );
+
+    if (redirect_to === 'post-success') {
+      res.redirect(`/employer/post-success/${job_id}?rejected=1`);
+    } else {
+      res.redirect(`/employer/dashboard?phone=${encodeURIComponent(phone)}&rejected=1`);
+    }
+  } catch (err) {
+    console.error('Error rejecting worker:', err);
+    res.redirect('/employer/dashboard');
   }
 });
 

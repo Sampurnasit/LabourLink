@@ -252,8 +252,25 @@ function initSchema() {
         UNIQUE (job_id, worker_id)
       )`, (err) => {
         if (err) return reject(err);
-        console.log('Database tables initialized: workers, jobs, job_interests, worker_cv, worker_ratings.');
-        resolve();
+
+        // 6. voice_calls table (AI Call Logs & Analytics)
+        db.run(`CREATE TABLE IF NOT EXISTS voice_calls (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          call_sid TEXT UNIQUE NOT NULL,
+          caller_phone TEXT NOT NULL,
+          caller_role TEXT DEFAULT 'guest',
+          caller_name TEXT,
+          duration_seconds INTEGER DEFAULT 0,
+          status TEXT DEFAULT 'in-progress',
+          escalated_to_human BOOLEAN DEFAULT 0,
+          conversation_id TEXT,
+          summary TEXT,
+          created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        )`, (voiceErr) => {
+          if (voiceErr) return reject(voiceErr);
+          console.log('Database tables initialized: workers, jobs, job_interests, worker_cv, worker_ratings, voice_calls.');
+          resolve();
+        });
       });
     });
   });
@@ -362,9 +379,77 @@ db.syncToSupabase = async function() {
   });
 };
 
+// ==========================================================================
+// 8. VOICE CALL LOGGING & ANALYTICS HELPERS
+// ==========================================================================
+db.logVoiceCall = async function({ callSid, callerPhone, callerRole = 'guest', callerName = null, status = 'in-progress', conversationId = null }) {
+  try {
+    const sql = `INSERT INTO voice_calls (call_sid, caller_phone, caller_role, caller_name, status, conversation_id)
+                 VALUES (?, ?, ?, ?, ?, ?)
+                 ON CONFLICT(call_sid) DO UPDATE SET
+                   caller_phone = excluded.caller_phone,
+                   caller_role = excluded.caller_role,
+                   caller_name = excluded.caller_name,
+                   status = excluded.status,
+                   conversation_id = COALESCE(excluded.conversation_id, voice_calls.conversation_id)`;
+    return await db.runAsync(sql, [callSid, callerPhone, callerRole, callerName, status, conversationId]);
+  } catch (err) {
+    console.error('Error logging voice call:', err.message);
+  }
+};
+
+db.updateVoiceCall = async function({ callSid, durationSeconds = null, status = 'completed', escalatedToHuman = null, conversationId = null, summary = null }) {
+  try {
+    const sets = [];
+    const params = [];
+    if (durationSeconds !== null) { sets.push('duration_seconds = ?'); params.push(parseInt(durationSeconds, 10) || 0); }
+    if (status !== null) { sets.push('status = ?'); params.push(status); }
+    if (escalatedToHuman !== null) { sets.push('escalated_to_human = ?'); params.push(escalatedToHuman ? 1 : 0); }
+    if (conversationId !== null) { sets.push('conversation_id = ?'); params.push(conversationId); }
+    if (summary !== null) { sets.push('summary = ?'); params.push(summary); }
+
+    if (sets.length === 0) return;
+    params.push(callSid);
+
+    const sql = `UPDATE voice_calls SET ${sets.join(', ')} WHERE call_sid = ?`;
+    return await db.runAsync(sql, params);
+  } catch (err) {
+    console.error('Error updating voice call:', err.message);
+  }
+};
+
+db.getVoiceCalls = async function({ limit = 50, offset = 0 } = {}) {
+  try {
+    const sql = `SELECT * FROM voice_calls ORDER BY id DESC LIMIT ? OFFSET ?`;
+    return await db.allAsync(sql, [limit, offset]);
+  } catch (err) {
+    console.error('Error fetching voice calls:', err.message);
+    return [];
+  }
+};
+
+db.getVoiceCallStats = async function() {
+  try {
+    const total = (await db.getAsync('SELECT COUNT(*) as count FROM voice_calls')).count || 0;
+    const completed = (await db.getAsync("SELECT COUNT(*) as count FROM voice_calls WHERE status = 'completed'")).count || 0;
+    const escalated = (await db.getAsync('SELECT COUNT(*) as count FROM voice_calls WHERE escalated_to_human = 1')).count || 0;
+    const avgDuration = (await db.getAsync("SELECT AVG(duration_seconds) as avg FROM voice_calls WHERE duration_seconds > 0")).avg || 0;
+    return {
+      totalCalls: total,
+      completedCalls: completed,
+      escalatedCalls: escalated,
+      averageDurationSeconds: Math.round(avgDuration)
+    };
+  } catch (err) {
+    console.error('Error fetching voice call stats:', err.message);
+    return { totalCalls: 0, completedCalls: 0, escalatedCalls: 0, averageDurationSeconds: 0 };
+  }
+};
+
 module.exports = db;
 module.exports.supabase = supabase;
 module.exports.pgPool = pgPool;
 module.exports.withRetry = withRetry;
 module.exports.isSupabaseConfigured = isSupabaseConfigured;
 module.exports.isConfigured = isSupabaseConfigured;
+

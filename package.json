@@ -8,6 +8,7 @@
     "seed": "node seed.js",
     "test": "node test-flow.js",
     "start": "node server.js",
+    "tunnel": "node ngrok-tunnel.js",
     "reverse": "adb reverse tcp:3000 tcp:3000 || %LOCALAPPDATA%\\Android\\Sdk\\platform-tools\\adb.exe reverse tcp:3000 tcp:3000"
   },
   "keywords": [],
@@ -15,6 +16,7 @@
   "license": "ISC",
   "type": "commonjs",
   "dependencies": {
+    "@ngrok/ngrok": "^1.7.0",
     "@supabase/supabase-js": "^2.116.0",
     "cors": "^2.8.6",
     "dotenv": "^17.4.2",

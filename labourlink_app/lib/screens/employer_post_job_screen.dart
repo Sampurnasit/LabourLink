@@ -109,12 +109,53 @@ class _EmployerPostJobScreenState extends State<EmployerPostJobScreen> {
       );
     } else {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Failed to post job. Please check connection.'),
+        SnackBar(
+          content: Text('Failed to post job: Cannot connect to ${ApiService.baseUrl}.'),
           backgroundColor: Colors.red,
+          action: SnackBarAction(
+            label: 'Configure',
+            textColor: Colors.white,
+            onPressed: _showSettings,
+          ),
         ),
       );
     }
+  }
+
+  void _showSettings() {
+    final controller = TextEditingController(text: ApiService.baseUrl);
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Backend Server URL'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Text('Enter your Node server address (e.g., http://localhost:3000 or http://192.168.0.196:3000):', style: TextStyle(fontSize: 12)),
+            const SizedBox(height: 10),
+            TextField(
+              controller: controller,
+              decoration: const InputDecoration(border: OutlineInputBorder(), labelText: 'Server Base URL'),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
+          FilledButton(
+            onPressed: () async {
+              await ApiService.setBaseUrl(controller.text);
+              if (ctx.mounted) Navigator.pop(ctx);
+              if (mounted) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(content: Text('Server URL set to: ${ApiService.baseUrl}')),
+                );
+              }
+            },
+            child: const Text('Save'),
+          ),
+        ],
+      ),
+    );
   }
 
   @override
@@ -122,6 +163,13 @@ class _EmployerPostJobScreenState extends State<EmployerPostJobScreen> {
     return Scaffold(
       appBar: AppBar(
         title: const Text('Post a 1-Day Job'),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.settings_outlined),
+            tooltip: 'Server Settings',
+            onPressed: _showSettings,
+          ),
+        ],
       ),
       body: SingleChildScrollView(
         padding: const EdgeInsets.all(20),

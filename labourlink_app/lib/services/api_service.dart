@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
+import 'package:shared_preferences/shared_preferences.dart';
 import '../models/worker.dart';
 import '../models/job.dart';
 
@@ -12,7 +13,7 @@ class ApiService {
     }
     switch (defaultTargetPlatform) {
       case TargetPlatform.android:
-        return 'http://10.0.2.2:3000';
+        return 'http://localhost:3000';
       default:
         return 'http://localhost:3000';
     }
@@ -20,8 +21,51 @@ class ApiService {
 
   static String baseUrl = defaultBaseUrl;
 
-  static void setBaseUrl(String newUrl) {
-    baseUrl = newUrl.replaceAll(RegExp(r'/+$'), '');
+  static Future<void> init() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final savedUrl = prefs.getString('api_base_url');
+      if (savedUrl != null && savedUrl.trim().isNotEmpty) {
+        baseUrl = savedUrl.trim().replaceAll(RegExp(r'/+$'), '');
+        return;
+      }
+    } catch (_) {}
+
+    // Auto-detect working endpoint on Android
+    if (!kIsWeb && defaultTargetPlatform == TargetPlatform.android) {
+      final candidates = [
+        'http://localhost:3000',      // Works on physical device via adb reverse
+        'http://192.168.0.196:3000',  // Works on local Wi-Fi
+        'http://10.0.2.2:3000',       // Works on Android Studio emulator
+      ];
+      for (final candidate in candidates) {
+        final reachable = await testConnection(candidate);
+        if (reachable) {
+          baseUrl = candidate;
+          break;
+        }
+      }
+    }
+  }
+
+  static Future<void> setBaseUrl(String newUrl) async {
+    baseUrl = newUrl.trim().replaceAll(RegExp(r'/+$'), '');
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString('api_base_url', baseUrl);
+    } catch (e) {
+      debugPrint('Error saving base URL: $e');
+    }
+  }
+
+  static Future<bool> testConnection([String? candidateUrl]) async {
+    try {
+      final target = (candidateUrl ?? baseUrl).trim().replaceAll(RegExp(r'/+$'), '');
+      final res = await http.get(Uri.parse('$target/api/stats')).timeout(const Duration(seconds: 3));
+      return res.statusCode == 200;
+    } catch (_) {
+      return false;
+    }
   }
 
   // 1. Platform Statistics

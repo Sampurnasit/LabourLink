@@ -19,6 +19,8 @@ class _HomeScreenState extends State<HomeScreen> {
   List<Job> _recentJobs = [];
   bool _isLoading = true;
 
+  bool _isServerConnected = false;
+
   @override
   void initState() {
     super.initState();
@@ -32,9 +34,12 @@ class _HomeScreenState extends State<HomeScreen> {
 
     final results = await Future.wait([statsFuture, jobsFuture]);
     if (mounted) {
+      final statsMap = results[0] as Map<String, dynamic>;
+      final jobsList = (results[1] as List<Job>).take(4).toList();
       setState(() {
-        _stats = results[0] as Map<String, dynamic>;
-        _recentJobs = (results[1] as List<Job>).take(4).toList();
+        _stats = statsMap;
+        _recentJobs = jobsList;
+        _isServerConnected = statsMap.isNotEmpty;
         _isLoading = false;
       });
     }
@@ -42,42 +47,116 @@ class _HomeScreenState extends State<HomeScreen> {
 
   void _showApiSettingsDialog() {
     final controller = TextEditingController(text: ApiService.baseUrl);
+    String? testStatus;
+    bool isTesting = false;
+
     showDialog(
       context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Backend API Server'),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const Text(
-              'Set your Node.js backend URL:\n• Windows/Web: http://localhost:3000\n• Android Emulator: http://10.0.2.2:3000\n• Physical Phone: http://<laptop-ip>:3000',
-              style: TextStyle(fontSize: 12, color: Colors.grey),
+      builder: (ctx) => StatefulBuilder(
+        builder: (context, setDialogState) => AlertDialog(
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          title: const Row(
+            children: [
+              Icon(Icons.dns_rounded, color: Color(0xFF2563EB)),
+              SizedBox(width: 8),
+              Text('Server Connection', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+            ],
+          ),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text(
+                  'Quick Presets:',
+                  style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: Colors.grey),
+                ),
+                const SizedBox(height: 6),
+                Wrap(
+                  spacing: 6,
+                  runSpacing: 6,
+                  children: [
+                    ActionChip(
+                      avatar: const Icon(Icons.computer, size: 14),
+                      label: const Text('Localhost (3000)', style: TextStyle(fontSize: 12)),
+                      onPressed: () => setDialogState(() => controller.text = 'http://localhost:3000'),
+                    ),
+                    ActionChip(
+                      avatar: const Icon(Icons.wifi, size: 14),
+                      label: const Text('Wi-Fi (192.168.0.196)', style: TextStyle(fontSize: 12)),
+                      onPressed: () => setDialogState(() => controller.text = 'http://192.168.0.196:3000'),
+                    ),
+                    ActionChip(
+                      avatar: const Icon(Icons.phone_android, size: 14),
+                      label: const Text('Emulator (10.0.2.2)', style: TextStyle(fontSize: 12)),
+                      onPressed: () => setDialogState(() => controller.text = 'http://10.0.2.2:3000'),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 14),
+                TextField(
+                  controller: controller,
+                  decoration: InputDecoration(
+                    labelText: 'Server Base URL',
+                    hintText: 'http://localhost:3000',
+                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
+                    prefixIcon: const Icon(Icons.link),
+                  ),
+                ),
+                const SizedBox(height: 12),
+                Row(
+                  children: [
+                    OutlinedButton.icon(
+                      icon: isTesting
+                          ? const SizedBox(width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2))
+                          : const Icon(Icons.network_check, size: 16),
+                      label: const Text('Test Ping'),
+                      onPressed: isTesting
+                          ? null
+                          : () async {
+                              setDialogState(() {
+                                isTesting = true;
+                                testStatus = null;
+                              });
+                              final ok = await ApiService.testConnection(controller.text);
+                              setDialogState(() {
+                                isTesting = false;
+                                testStatus = ok ? '✓ Connected!' : '✗ Cannot reach';
+                              });
+                            },
+                    ),
+                    const SizedBox(width: 8),
+                    if (testStatus != null)
+                      Expanded(
+                        child: Text(
+                          testStatus!,
+                          style: TextStyle(
+                            fontSize: 12,
+                            fontWeight: FontWeight.bold,
+                            color: testStatus!.startsWith('✓') ? const Color(0xFF10B981) : Colors.red,
+                          ),
+                        ),
+                      ),
+                  ],
+                ),
+              ],
             ),
-            const SizedBox(height: 12),
-            TextField(
-              controller: controller,
-              decoration: const InputDecoration(
-                labelText: 'Base URL',
-                border: OutlineInputBorder(),
-              ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text('Cancel'),
+            ),
+            FilledButton(
+              onPressed: () async {
+                await ApiService.setBaseUrl(controller.text);
+                if (ctx.mounted) Navigator.pop(ctx);
+                _loadData();
+              },
+              child: const Text('Save & Apply'),
             ),
           ],
         ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx),
-            child: const Text('Cancel'),
-          ),
-          FilledButton(
-            onPressed: () {
-              ApiService.setBaseUrl(controller.text);
-              Navigator.pop(ctx);
-              _loadData();
-            },
-            child: const Text('Save & Reconnect'),
-          ),
-        ],
       ),
     );
   }
@@ -130,8 +209,26 @@ class _HomeScreenState extends State<HomeScreen> {
             onPressed: _loadData,
           ),
           IconButton(
-            icon: const Icon(Icons.settings_outlined),
-            tooltip: 'API Settings',
+            icon: Stack(
+              clipBehavior: Clip.none,
+              children: [
+                const Icon(Icons.settings_outlined),
+                Positioned(
+                  right: -1,
+                  top: -1,
+                  child: Container(
+                    width: 9,
+                    height: 9,
+                    decoration: BoxDecoration(
+                      color: _isServerConnected ? const Color(0xFF10B981) : Colors.red,
+                      shape: BoxShape.circle,
+                      border: Border.all(color: Colors.white, width: 1.5),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            tooltip: _isServerConnected ? 'Server Connected' : 'Server Offline - Tap to configure',
             onPressed: _showApiSettingsDialog,
           ),
         ],
@@ -144,6 +241,45 @@ class _HomeScreenState extends State<HomeScreen> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
+              if (!_isLoading && !_isServerConnected)
+                Container(
+                  margin: const EdgeInsets.only(bottom: 16),
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFFEF2F2),
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(color: const Color(0xFFFCA5A5)),
+                  ),
+                  child: Row(
+                    children: [
+                      const Icon(Icons.cloud_off, color: Colors.red),
+                      const SizedBox(width: 10),
+                      const Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              'Database Server Offline',
+                              style: TextStyle(fontWeight: FontWeight.bold, color: Colors.red, fontSize: 13),
+                            ),
+                            Text(
+                              'Cannot connect to backend API. Tap "Connect" to check server URL.',
+                              style: TextStyle(fontSize: 11, color: Color(0xFF7F1D1D)),
+                            ),
+                          ],
+                        ),
+                      ),
+                      FilledButton.tonal(
+                        style: FilledButton.styleFrom(
+                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                          visualDensity: VisualDensity.compact,
+                        ),
+                        onPressed: _showApiSettingsDialog,
+                        child: const Text('Connect', style: TextStyle(fontSize: 12)),
+                      ),
+                    ],
+                  ),
+                ),
               // 1. Hero Banner
               Container(
                 padding: const EdgeInsets.all(20),

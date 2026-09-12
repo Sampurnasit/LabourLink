@@ -25,10 +25,11 @@ app.use('/app', express.static(flutterBuildDir));
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
-// Helper to sanitize phone input
+// Helper to sanitize phone input (extracts last 10 digits e.g. for Indian numbers with +91 or leading 0)
 function cleanPhone(phone) {
   if (!phone) return '';
-  return String(phone).replace(/[^0-9]/g, '').slice(0, 10);
+  const digits = String(phone).replace(/[^0-9]/g, '');
+  return digits.length > 10 ? digits.slice(-10) : digits;
 }
 
 // ==========================================================================

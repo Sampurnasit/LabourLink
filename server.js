@@ -119,6 +119,7 @@ async function checkWorkerActiveConflict(workerId, targetJobId) {
   }
 }
 
+<<<<<<< Updated upstream
 // Helper: parse wage string into a numeric value (e.g. "₹850/day" -> 850)
 function parseWage(wageStr) {
   if (!wageStr) return 0;
@@ -140,6 +141,93 @@ function maskPhone(phone) {
   const digits = String(phone).replace(/[^0-9]/g, '');
   if (digits.length < 4) return '******';
   return '•'.repeat(Math.max(0, digits.length - 2)) + digits.slice(-2);
+=======
+/**
+ * Validation function to prevent duplicate user registrations.
+ * Supports Option B (Role-Based Uniqueness: same phone cannot register twice in same role)
+ * and optional Option A (Global Uniqueness).
+ *
+ * @param {string} identifier - Phone number or email
+ * @param {'worker' | 'hirer' | 'employer'} role
+ * @param {boolean} [globalCheck=false]
+ * @returns {Promise<{ exists: boolean, role?: string, user?: object }>}
+ */
+async function checkExistingUser(identifier, role, globalCheck = false) {
+  try {
+    const phone = cleanPhone(identifier);
+    if (!phone) return { exists: false };
+
+    // 1. Check Worker role
+    if (role === 'worker') {
+      const { data: worker } = await supabase
+        .from('workers')
+        .select('id, name, phone_number, skill_type, location')
+        .eq('phone_number', phone)
+        .maybeSingle();
+
+      if (worker) {
+        return { exists: true, role: 'worker', user: worker };
+      }
+    }
+
+    // 2. Check Hirer / Employer role
+    if (role === 'hirer' || role === 'employer') {
+      // Check employers table if available
+      try {
+        const { data: employer } = await supabase
+          .from('employers')
+          .select('id, name, phone_number')
+          .eq('phone_number', phone)
+          .maybeSingle();
+
+        if (employer) {
+          return { exists: true, role: 'hirer', user: employer };
+        }
+      } catch (_) {}
+
+      // Also check if they already have jobs with this employer_phone
+      const { data: job } = await supabase
+        .from('jobs')
+        .select('id, employer_name, employer_phone')
+        .eq('employer_phone', phone)
+        .limit(1)
+        .maybeSingle();
+
+      if (job) {
+        return {
+          exists: true,
+          role: 'hirer',
+          user: { name: job.employer_name, phone_number: job.employer_phone }
+        };
+      }
+    }
+
+    // 3. Optional cross-role check (Option A: Global uniqueness)
+    if (globalCheck) {
+      if (role !== 'worker') {
+        const { data: w } = await supabase
+          .from('workers')
+          .select('id, name')
+          .eq('phone_number', phone)
+          .maybeSingle();
+        if (w) return { exists: true, role: 'worker', user: w };
+      }
+      if (role !== 'hirer' && role !== 'employer') {
+        const { data: j } = await supabase
+          .from('jobs')
+          .select('id, employer_name')
+          .eq('employer_phone', phone)
+          .maybeSingle();
+        if (j) return { exists: true, role: 'hirer', user: j };
+      }
+    }
+
+    return { exists: false };
+  } catch (err) {
+    console.error('Error checking existing user:', err);
+    return { exists: false };
+  }
+>>>>>>> Stashed changes
 }
 
 // ==========================================================================
@@ -345,7 +433,7 @@ app.get('/api/jobs/:id/matches', async (req, res) => {
   }
 });
 
-// 5. Worker Registration / Update
+// 5. Worker Registration (enforces uniqueness; returns 409 Conflict on duplicate)
 app.post('/api/workers/register', async (req, res) => {
   try {
     const { name, phone_number, skill_type, location, available } = req.body;
@@ -353,9 +441,14 @@ app.post('/api/workers/register', async (req, res) => {
     const isAvailable = available !== undefined ? (available ? 1 : 0) : 1;
 
     if (!name || !phone || !skill_type || !location) {
-      return res.status(400).json({ error: 'Please provide all required worker fields' });
+      return res.status(400).json({
+        success: false,
+        error: 'Validation failed',
+        message: 'Please provide all required worker fields (name, phone, skill, location)'
+      });
     }
 
+<<<<<<< Updated upstream
     await db.runAsync(
       `INSERT INTO workers (name, phone_number, skill_type, location, available)
        VALUES (?, ?, ?, ?, ?)
@@ -369,8 +462,122 @@ app.post('/api/workers/register', async (req, res) => {
 
     const worker = await db.getAsync('SELECT * FROM workers WHERE phone_number = ?', [phone]);
     res.json({ status: 'ok', worker });
+=======
+    // Step 1: Pre-Registration Validation — check if phone number already registered as worker
+    const existing = await checkExistingUser(phone, 'worker');
+    if (existing.exists) {
+      return res.status(409).json({
+        success: false,
+        error: 'Conflict',
+        message: 'An account with this phone number already exists. Please log in instead.',
+        role: 'worker'
+      });
+    }
+
+    // Step 2: Insert new worker record (using insert, not upsert, to preserve unique integrity)
+    const { data: worker, error } = await supabase
+      .from('workers')
+      .insert([
+        {
+          name: name.trim(),
+          phone_number: phone,
+          skill_type,
+          location,
+          available: isAvailable
+        }
+      ])
+      .select()
+      .single();
+
+    if (error) {
+      // Step 3: Database-level unique constraint violation handling (PostgreSQL code 23505)
+      if (error.code === '23505' || (error.message && error.message.toLowerCase().includes('duplicate'))) {
+        return res.status(409).json({
+          success: false,
+          error: 'Conflict',
+          message: 'An account with this phone number already exists. Please log in instead.',
+          role: 'worker'
+        });
+      }
+      throw error;
+    }
+
+    res.status(201).json({
+      success: true,
+      status: 'ok',
+      message: 'Worker profile successfully registered.',
+      worker
+    });
+>>>>>>> Stashed changes
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    console.error('Error registering worker:', err);
+    res.status(500).json({
+      success: false,
+      error: err.message || 'Failed to register worker'
+    });
+  }
+});
+
+// 5a. Employer / Hirer Registration (enforces uniqueness; returns 409 Conflict on duplicate)
+app.post(['/api/employers/register', '/api/hirers/register'], async (req, res) => {
+  try {
+    const { name, phone_number, company_name, location } = req.body;
+    const phone = cleanPhone(phone_number);
+
+    if (!name || !phone) {
+      return res.status(400).json({
+        success: false,
+        error: 'Validation failed',
+        message: 'Please provide your name and phone number'
+      });
+    }
+
+    // Pre-Registration Validation
+    const existing = await checkExistingUser(phone, 'hirer');
+    if (existing.exists) {
+      return res.status(409).json({
+        success: false,
+        error: 'Conflict',
+        message: 'An account with this phone number already exists. Please log in instead.',
+        role: 'hirer'
+      });
+    }
+
+    // Try inserting into employers table
+    const { data: employer, error } = await supabase
+      .from('employers')
+      .insert([
+        {
+          name: name.trim(),
+          phone_number: phone,
+          company_name: company_name || null,
+          location: location || null
+        }
+      ])
+      .select()
+      .maybeSingle();
+
+    if (error) {
+      if (error.code === '23505' || (error.message && error.message.toLowerCase().includes('duplicate'))) {
+        return res.status(409).json({
+          success: false,
+          error: 'Conflict',
+          message: 'An account with this phone number already exists. Please log in instead.',
+          role: 'hirer'
+        });
+      }
+      console.warn('Notice: employers table insert skipped:', error.message);
+    }
+
+    res.status(201).json({
+      success: true,
+      status: 'ok',
+      message: 'Hirer profile registered successfully.',
+      employer: employer || { name, phone_number: phone }
+    });
+  } catch (err) {
+    console.error('Error registering employer:', err);
+    res.status(500).json({ success: false, error: err.message });
   }
 });
 
@@ -890,6 +1097,7 @@ app.post('/worker/register', async (req, res) => {
       });
     }
 
+<<<<<<< Updated upstream
     await db.runAsync(
       `INSERT INTO workers (name, phone_number, skill_type, location, available)
        VALUES (?, ?, ?, ?, ?)
@@ -900,6 +1108,36 @@ app.post('/worker/register', async (req, res) => {
          available = excluded.available`,
       [name.trim(), phone, skill_type, location, isAvailable]
     );
+=======
+    // Pre-Registration Validation: Check if worker already registered
+    const existing = await checkExistingUser(phone, 'worker');
+    if (existing.exists) {
+      return res.status(409).render('worker-register', {
+        errorMessage: 'An account with this phone number already exists. Please log in instead.'
+      });
+    }
+
+    const { error } = await supabase
+      .from('workers')
+      .insert([
+        {
+          name: name.trim(),
+          phone_number: phone,
+          skill_type,
+          location,
+          available: isAvailable
+        }
+      ]);
+
+    if (error) {
+      if (error.code === '23505' || (error.message && error.message.toLowerCase().includes('duplicate'))) {
+        return res.status(409).render('worker-register', {
+          errorMessage: 'An account with this phone number already exists. Please log in instead.'
+        });
+      }
+      throw error;
+    }
+>>>>>>> Stashed changes
 
     res.redirect(`/worker/dashboard?phone=${encodeURIComponent(phone)}&registered=1`);
   } catch (err) {

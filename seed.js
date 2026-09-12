@@ -4,11 +4,13 @@ async function seed() {
   console.log('Seeding demo data for LabourLink...');
 
   // Clear existing records
+  await db.runAsync('DELETE FROM worker_ratings');
+  await db.runAsync('DELETE FROM worker_cv');
   await db.runAsync('DELETE FROM job_interests');
   await db.runAsync('DELETE FROM jobs');
   await db.runAsync('DELETE FROM workers');
   try {
-    await db.runAsync("DELETE FROM sqlite_sequence WHERE name IN ('workers', 'jobs', 'job_interests')");
+    await db.runAsync("DELETE FROM sqlite_sequence WHERE name IN ('workers', 'jobs', 'job_interests', 'worker_cv', 'worker_ratings')");
   } catch (e) {
     // sqlite_sequence may not exist yet if fresh, ignore
   }
@@ -85,6 +87,24 @@ async function seed() {
       wage_offered: '₹650/day',
       date_needed: 'Today',
       status: 'filled'
+    },
+    {
+      employer_name: 'Anand Buildcon',
+      employer_phone: '9900112233',
+      skill_needed: 'Construction',
+      location: 'Koramangala',
+      wage_offered: '₹850/day',
+      date_needed: 'Yesterday',
+      status: 'completed'
+    },
+    {
+      employer_name: 'Suresh Interiors',
+      employer_phone: '9900112255',
+      skill_needed: 'Painting',
+      location: 'Indiranagar',
+      wage_offered: '₹900/day',
+      date_needed: '3 days ago',
+      status: 'completed'
     }
   ];
 
@@ -124,7 +144,98 @@ async function seed() {
     [jobIds[4], workerMap['9876500005']]
   );
 
-  console.log('✓ Seeded sample job interests and active bookings');
+  // 4. Seed sample Worker CVs
+  const rameshId = workerMap['9876500001'];
+  if (rameshId) {
+    await db.runAsync(
+      `INSERT INTO worker_cv (worker_id, full_name, dob_or_age, phone_number, skills, years_of_experience, previous_work, work_location, daily_wage_expectation, availability_type, languages, about_me)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        rameshId,
+        'Ramesh Kumar',
+        '32',
+        '9876500001',
+        JSON.stringify(['Mason', 'Bricklayer', 'Plastering', 'Tiling']),
+        6,
+        JSON.stringify([
+          { company: 'Prestige Builders', duration: '2021 - 2023', role: 'Lead Mason' },
+          { company: 'Sobha Developers', duration: '2019 - 2021', role: 'Bricklayer' }
+        ]),
+        'Koramangala, Bangalore',
+        '₹850/day',
+        'Full-time (Immediate)',
+        'Hindi, Kannada, Basic English',
+        'Experienced senior mason with precision plastering and tiling skills. Reliable and punctual on site.'
+      ]
+    );
+  }
+
+  const sureshId = workerMap['9876500002'];
+  if (sureshId) {
+    await db.runAsync(
+      `INSERT INTO worker_cv (worker_id, full_name, dob_or_age, phone_number, skills, years_of_experience, previous_work, work_location, daily_wage_expectation, availability_type, languages, about_me)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        sureshId,
+        'Suresh Patel',
+        '29',
+        '9876500002',
+        JSON.stringify(['Interior Painting', 'Exterior Texture', 'Waterproofing']),
+        4,
+        JSON.stringify([
+          { company: 'Asian Paints Color Ideas', duration: '2022 - 2024', role: 'Certified Painter' }
+        ]),
+        'Indiranagar, Bangalore',
+        '₹950/day',
+        'Full-time',
+        'Hindi, Gujarati, English',
+        'Specialist in luxury wall finishes, weather-proof exterior coats, and neat clean work.'
+      ]
+    );
+  }
+
+  const rafiqId = workerMap['9876500003'];
+  if (rafiqId) {
+    await db.runAsync(
+      `INSERT INTO worker_cv (worker_id, full_name, dob_or_age, phone_number, skills, years_of_experience, previous_work, work_location, daily_wage_expectation, availability_type, languages, about_me)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        rafiqId,
+        'Mohammed Rafiq',
+        '35',
+        '9876500003',
+        JSON.stringify(['Master Plumber', 'Pipe Fitting', 'Bathroom Sanity']),
+        8,
+        JSON.stringify([
+          { company: 'Apex Plumbing Solutions', duration: '2018 - 2023', role: 'Senior Plumber' }
+        ]),
+        'Koramangala, Bangalore',
+        '₹1000/day',
+        'Full-time',
+        'Hindi, Urdu, Kannada',
+        'Certified plumber with commercial and residential expertise. Expert in emergency leak fixes.'
+      ]
+    );
+  }
+
+  // 5. Seed sample Worker Ratings
+  if (rameshId && jobIds[5]) {
+    await db.runAsync(
+      `INSERT INTO worker_ratings (worker_id, employer_phone, job_id, rating, comment)
+       VALUES (?, '9900112233', ?, 4.8, 'Ramesh did an outstanding job on our wall plastering. Very punctual and hard working!')`,
+      [rameshId, jobIds[5]]
+    );
+  }
+
+  if (sureshId && jobIds[6]) {
+    await db.runAsync(
+      `INSERT INTO worker_ratings (worker_id, employer_phone, job_id, rating, comment)
+       VALUES (?, '9900112255', ?, 4.6, 'Very clean painter, no drips or mess left behind. Highly recommend.')`,
+      [sureshId, jobIds[6]]
+    );
+  }
+
+  console.log('✓ Seeded sample job interests, active bookings, worker CVs, and ratings');
   console.log('Database seeding complete!');
 }
 

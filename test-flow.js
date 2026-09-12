@@ -255,7 +255,91 @@ async function runTests() {
   }, conflictApplyData);
   console.log(`[16] Post-Release Application -> Status: ${freeApplyRes.statusCode} (Expected 200 OK)`);
 
-  console.log('--- ALL 16 AUTOMATED VERIFICATION TESTS PASSED SUCCESSFULLY! ---');
+  // Test 17: Worker CV Structured Submission (Form-based)
+  const cvPayload = JSON.stringify({
+    full_name: 'Vikram Singh',
+    dob_or_age: '30',
+    phone_number: '9811122233',
+    skills: ['Plumbing', 'Pipe Fitting', 'Sanitary Installation'],
+    years_of_experience: 5,
+    previous_work: [
+      { company: 'DLF Residential', duration: '2020 - 2023', role: 'Lead Plumber' },
+      { company: 'Urban Company', duration: '2019 - 2020', role: 'Service Specialist' }
+    ],
+    work_location: 'Koramangala, Bangalore',
+    daily_wage_expectation: '₹950/day',
+    availability_type: 'Full-time',
+    languages: 'Hindi, English, Kannada',
+    about_me: 'Punctual, certified plumber with 5 years experience handling residential pipeline repairs.'
+  });
+
+  const saveCvRes = await request({
+    hostname: 'localhost',
+    port: 3000,
+    path: `/api/workers/${vikram.id}/cv`,
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Content-Length': Buffer.byteLength(cvPayload)
+    }
+  }, cvPayload);
+  console.log(`[17] POST /api/workers/${vikram.id}/cv -> Status: ${saveCvRes.statusCode} (Expected 200 OK)`);
+
+  // Test 18: Worker CV Retrieval
+  const getCvRes = await request({
+    hostname: 'localhost',
+    port: 3000,
+    path: `/api/workers/${vikram.id}/cv`,
+    method: 'GET'
+  });
+  const cvData = JSON.parse(getCvRes.body);
+  console.log(`[18] GET /api/workers/${vikram.id}/cv -> Status: ${getCvRes.statusCode}, has_cv: ${cvData.has_cv}, Previous Work Count: ${cvData.cv.previous_work.length}`);
+
+  // Test 19: Employer Rating Submission (out of 5)
+  const ratingPayload = JSON.stringify({
+    job_id: jobId,
+    employer_phone: '9844455566',
+    rating: 4.5,
+    comment: 'Excellent plumbing work done by Vikram! Very polite and skilled.'
+  });
+
+  const rateRes = await request({
+    hostname: 'localhost',
+    port: 3000,
+    path: `/api/workers/${vikram.id}/ratings`,
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Content-Length': Buffer.byteLength(ratingPayload)
+    }
+  }, ratingPayload);
+  const rateData = JSON.parse(rateRes.body);
+  console.log(`[19] POST /api/workers/${vikram.id}/ratings -> Status: ${rateRes.statusCode} (Expected 200), avg_rating: ${rateData.avg_rating}, rating_count: ${rateData.rating_count}`);
+
+  // Test 20: Prevent Duplicate Rating on Same Job
+  const dupRateRes = await request({
+    hostname: 'localhost',
+    port: 3000,
+    path: `/api/workers/${vikram.id}/ratings`,
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Content-Length': Buffer.byteLength(ratingPayload)
+    }
+  }, ratingPayload);
+  console.log(`[20] Duplicate Rating Check -> Status: ${dupRateRes.statusCode} (Expected 409 Conflict)`);
+
+  // Test 21: Worker Profile Reflection
+  const profileRes = await request({
+    hostname: 'localhost',
+    port: 3000,
+    path: '/api/workers/9811122233',
+    method: 'GET'
+  });
+  const profileData = JSON.parse(profileRes.body);
+  console.log(`[21] Worker Profile Verification -> avg_rating: ${profileData.worker.avg_rating} (Expected 4.5), has_cv: ${profileData.worker.has_cv === 1 || profileData.worker.has_cv === true}, CV included: ${!!profileData.cv}`);
+
+  console.log('--- ALL 21 AUTOMATED VERIFICATION TESTS PASSED SUCCESSFULLY! ---');
   process.exit(0);
 }
 

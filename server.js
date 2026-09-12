@@ -38,6 +38,25 @@ app.get('/api/health', (req, res) => {
   res.json({ status: 'ok', time: new Date().toISOString() });
 });
 
+// Supabase Connection Status
+app.get('/api/supabase/status', async (req, res) => {
+  res.json({
+    status: db.isSupabaseConfigured ? 'connected' : 'unconfigured',
+    isConfigured: db.isSupabaseConfigured,
+    supabaseUrl: process.env.SUPABASE_URL || null
+  });
+});
+
+// Trigger sync to Supabase
+app.post('/api/supabase/sync', async (req, res) => {
+  try {
+    const result = await db.syncToSupabase();
+    res.json(result);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // Helper to sanitize phone input (extracts last 10 digits e.g. for Indian numbers with +91 or leading 0)
 function cleanPhone(phone) {
   if (!phone) return '';
@@ -166,7 +185,10 @@ app.get('/api/jobs/:id/matches', async (req, res) => {
     const matchedWorkers = await db.allAsync(
       `SELECT w.*, 
               (CASE WHEN w.status = 'HIRED' OR w.current_active_job_id IS NOT NULL THEN 1 ELSE 0 END) as is_hired_by_other,
-              w.current_location_zone as active_zone
+              w.current_location_zone as active_zone,
+              COALESCE((SELECT ROUND(AVG(rating), 1) FROM worker_ratings WHERE worker_id = w.id), 0.0) as avg_rating,
+              COALESCE((SELECT COUNT(*) FROM worker_ratings WHERE worker_id = w.id), 0) as rating_count,
+              COALESCE((SELECT COUNT(*) > 0 FROM worker_cv WHERE worker_id = w.id), 0) as has_cv
        FROM workers w
        WHERE w.skill_type = ? AND w.location = ?
        ORDER BY (CASE WHEN w.status = 'HIRED' OR w.current_active_job_id IS NOT NULL THEN 1 ELSE 0 END), w.id DESC`,
@@ -177,7 +199,10 @@ app.get('/api/jobs/:id/matches', async (req, res) => {
     const nearbyWorkers = await db.allAsync(
       `SELECT w.*, 
               (CASE WHEN w.status = 'HIRED' OR w.current_active_job_id IS NOT NULL THEN 1 ELSE 0 END) as is_hired_by_other,
-              w.current_location_zone as active_zone
+              w.current_location_zone as active_zone,
+              COALESCE((SELECT ROUND(AVG(rating), 1) FROM worker_ratings WHERE worker_id = w.id), 0.0) as avg_rating,
+              COALESCE((SELECT COUNT(*) FROM worker_ratings WHERE worker_id = w.id), 0) as rating_count,
+              COALESCE((SELECT COUNT(*) > 0 FROM worker_cv WHERE worker_id = w.id), 0) as has_cv
        FROM workers w
        WHERE w.skill_type = ? AND w.location != ?
        ORDER BY (CASE WHEN w.status = 'HIRED' OR w.current_active_job_id IS NOT NULL THEN 1 ELSE 0 END), w.id DESC LIMIT 5`,
@@ -228,10 +253,29 @@ app.post('/api/workers/register', async (req, res) => {
 app.get('/api/workers/:phone', async (req, res) => {
   try {
     const phone = cleanPhone(req.params.phone);
-    const worker = await db.getAsync('SELECT * FROM workers WHERE phone_number = ?', [phone]);
+    const worker = await db.getAsync(
+      `SELECT w.*,
+              COALESCE((SELECT ROUND(AVG(rating), 1) FROM worker_ratings WHERE worker_id = w.id), 0.0) as avg_rating,
+              COALESCE((SELECT COUNT(*) FROM worker_ratings WHERE worker_id = w.id), 0) as rating_count,
+              COALESCE((SELECT COUNT(*) > 0 FROM worker_cv WHERE worker_id = w.id), 0) as has_cv
+       FROM workers w
+       WHERE w.phone_number = ?`,
+      [phone]
+    );
 
     if (!worker) {
       return res.status(404).json({ error: 'Worker not found' });
+    }
+
+    // Fetch worker CV if exists
+    const cvRecord = await db.getAsync('SELECT * FROM worker_cv WHERE worker_id = ?', [worker.id]);
+    let cv = null;
+    if (cvRecord) {
+      let skills = [];
+      let previous_work = [];
+      try { skills = JSON.parse(cvRecord.skills); } catch (e) { skills = cvRecord.skills ? cvRecord.skills.split(',').map(s => s.trim()) : []; }
+      try { previous_work = JSON.parse(cvRecord.previous_work); } catch (e) { previous_work = []; }
+      cv = { ...cvRecord, skills, previous_work };
     }
 
     // Matched open jobs in worker's area
@@ -259,6 +303,7 @@ app.get('/api/workers/:phone', async (req, res) => {
     res.json({
       status: 'ok',
       worker,
+      cv,
       matchedJobs,
       otherSkillJobs,
       appliedJobs
@@ -323,7 +368,10 @@ app.get('/api/employers/:phone/jobs', async (req, res) => {
 
     for (const job of jobs) {
       const interestedWorkers = await db.allAsync(
-        `SELECT w.id as worker_id, w.name, w.phone_number, w.skill_type, w.location, w.available, ji.status
+        `SELECT w.id as worker_id, w.name, w.phone_number, w.skill_type, w.location, w.available, ji.status,
+                COALESCE((SELECT ROUND(AVG(rating), 1) FROM worker_ratings WHERE worker_id = w.id), 0.0) as avg_rating,
+                COALESCE((SELECT COUNT(*) FROM worker_ratings WHERE worker_id = w.id), 0) as rating_count,
+                COALESCE((SELECT COUNT(*) > 0 FROM worker_cv WHERE worker_id = w.id), 0) as has_cv
          FROM job_interests ji
          JOIN workers w ON ji.worker_id = w.id
          WHERE ji.job_id = ?
@@ -384,6 +432,21 @@ app.post('/api/jobs/:id/complete', async (req, res) => {
       return res.status(404).json({ error: 'Job not found' });
     }
 
+    // Capture the assigned or confirmed worker before releasing
+    const assignedWorker = await db.getAsync(
+      `SELECT w.id, w.name, w.phone_number, w.skill_type
+       FROM workers w
+       WHERE w.current_active_job_id = ?`,
+      [jobId]
+    );
+    const confirmedWorker = assignedWorker || await db.getAsync(
+      `SELECT w.id, w.name, w.phone_number, w.skill_type
+       FROM job_interests ji
+       JOIN workers w ON ji.worker_id = w.id
+       WHERE ji.job_id = ? AND ji.status = 'confirmed'`,
+      [jobId]
+    );
+
     await db.runAsync("UPDATE jobs SET status = 'completed' WHERE id = ?", [jobId]);
     await db.runAsync(
       `UPDATE workers 
@@ -392,7 +455,11 @@ app.post('/api/jobs/:id/complete', async (req, res) => {
       [jobId]
     );
 
-    res.json({ status: 'ok', message: 'Job completed and labourer is now available' });
+    res.json({
+      status: 'ok',
+      message: 'Job completed and labourer is now available',
+      worker: confirmedWorker || null
+    });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -416,6 +483,230 @@ app.post('/api/jobs/:id/cancel', async (req, res) => {
     );
 
     res.json({ status: 'ok', message: 'Job cancelled and labourer is now available' });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// 13. Get Worker CV (Structured form data)
+app.get('/api/workers/:id/cv', async (req, res) => {
+  try {
+    const workerId = req.params.id;
+    const worker = await db.getAsync(
+      `SELECT w.*,
+              COALESCE((SELECT ROUND(AVG(rating), 1) FROM worker_ratings WHERE worker_id = w.id), 0.0) as avg_rating,
+              COALESCE((SELECT COUNT(*) FROM worker_ratings WHERE worker_id = w.id), 0) as rating_count
+       FROM workers w WHERE w.id = ?`,
+      [workerId]
+    );
+    if (!worker) {
+      return res.status(404).json({ error: 'Worker not found' });
+    }
+
+    const cv = await db.getAsync('SELECT * FROM worker_cv WHERE worker_id = ?', [workerId]);
+    if (!cv) {
+      return res.json({
+        status: 'ok',
+        has_cv: false,
+        worker,
+        cv: null
+      });
+    }
+
+    let skills = [];
+    let previousWork = [];
+    try { skills = JSON.parse(cv.skills); } catch (e) { skills = cv.skills ? cv.skills.split(',').map(s => s.trim()) : []; }
+    try { previousWork = JSON.parse(cv.previous_work); } catch (e) { previousWork = []; }
+
+    res.json({
+      status: 'ok',
+      has_cv: true,
+      worker,
+      cv: {
+        ...cv,
+        skills,
+        previous_work: previousWork
+      }
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// 14. Save / Update Worker CV (Structured Form Submission)
+app.post('/api/workers/:id/cv', async (req, res) => {
+  try {
+    const workerId = parseInt(req.params.id, 10);
+    const worker = await db.getAsync('SELECT id, name, phone_number FROM workers WHERE id = ?', [workerId]);
+    if (!worker) {
+      return res.status(404).json({ error: 'Worker not found' });
+    }
+
+    const {
+      full_name,
+      dob_or_age,
+      phone_number,
+      skills,
+      years_of_experience,
+      previous_work,
+      work_location,
+      daily_wage_expectation,
+      availability_type,
+      languages,
+      about_me
+    } = req.body;
+
+    if (!full_name) {
+      return res.status(400).json({ error: 'Full name is required for CV' });
+    }
+
+    const skillsJson = Array.isArray(skills) ? JSON.stringify(skills) : (skills ? JSON.stringify([skills]) : '[]');
+    const prevWorkJson = Array.isArray(previous_work) ? JSON.stringify(previous_work) : '[]';
+    const yoe = parseInt(years_of_experience, 10) || 0;
+
+    await db.runAsync(
+      `INSERT INTO worker_cv (
+         worker_id, full_name, dob_or_age, phone_number, skills,
+         years_of_experience, previous_work, work_location,
+         daily_wage_expectation, availability_type, languages, about_me, updated_at
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+       ON CONFLICT(worker_id) DO UPDATE SET
+         full_name = excluded.full_name,
+         dob_or_age = excluded.dob_or_age,
+         phone_number = excluded.phone_number,
+         skills = excluded.skills,
+         years_of_experience = excluded.years_of_experience,
+         previous_work = excluded.previous_work,
+         work_location = excluded.work_location,
+         daily_wage_expectation = excluded.daily_wage_expectation,
+         availability_type = excluded.availability_type,
+         languages = excluded.languages,
+         about_me = excluded.about_me,
+         updated_at = CURRENT_TIMESTAMP`,
+      [
+        workerId,
+        full_name.trim(),
+        dob_or_age || '',
+        cleanPhone(phone_number) || worker.phone_number,
+        skillsJson,
+        yoe,
+        prevWorkJson,
+        work_location || '',
+        daily_wage_expectation || '',
+        availability_type || 'Full-time',
+        languages || '',
+        about_me || ''
+      ]
+    );
+
+    res.json({
+      status: 'ok',
+      message: 'Worker CV saved successfully'
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// 15. Submit Worker Rating (1-5 stars, preventing duplicate job ratings)
+app.post('/api/workers/:id/ratings', async (req, res) => {
+  try {
+    const workerId = parseInt(req.params.id, 10);
+    const { job_id, employer_phone, rating, comment } = req.body;
+
+    if (!job_id) {
+      return res.status(400).json({ error: 'job_id is required to rate a worker' });
+    }
+
+    const numRating = parseFloat(rating);
+    if (isNaN(numRating) || numRating < 1.0 || numRating > 5.0) {
+      return res.status(400).json({ error: 'Rating must be a number between 1.0 and 5.0 stars' });
+    }
+
+    const job = await db.getAsync('SELECT * FROM jobs WHERE id = ?', [job_id]);
+    if (!job) {
+      return res.status(404).json({ error: 'Job not found' });
+    }
+
+    // Check duplicate rating for this job & worker
+    const existing = await db.getAsync(
+      'SELECT id FROM worker_ratings WHERE job_id = ? AND worker_id = ?',
+      [job_id, workerId]
+    );
+    if (existing) {
+      return res.status(409).json({ error: 'You have already submitted a rating for this completed job.' });
+    }
+
+    const empPhone = cleanPhone(employer_phone || job.employer_phone);
+
+    await db.runAsync(
+      `INSERT INTO worker_ratings (worker_id, employer_phone, job_id, rating, comment)
+       VALUES (?, ?, ?, ?, ?)`,
+      [workerId, empPhone, job_id, Math.round(numRating * 10) / 10, (comment || '').trim()]
+    );
+
+    const stats = await db.getAsync(
+      `SELECT ROUND(AVG(rating), 1) as avg_rating, COUNT(*) as rating_count
+       FROM worker_ratings
+       WHERE worker_id = ?`,
+      [workerId]
+    );
+
+    res.json({
+      status: 'ok',
+      message: 'Rating submitted successfully',
+      avg_rating: stats && stats.avg_rating ? stats.avg_rating : numRating,
+      rating_count: stats && stats.rating_count ? stats.rating_count : 1
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// 16. Get Worker Ratings & Reviews
+app.get('/api/workers/:id/ratings', async (req, res) => {
+  try {
+    const workerId = req.params.id;
+    const stats = await db.getAsync(
+      `SELECT ROUND(AVG(rating), 1) as avg_rating, COUNT(*) as rating_count
+       FROM worker_ratings
+       WHERE worker_id = ?`,
+      [workerId]
+    );
+
+    const reviews = await db.allAsync(
+      `SELECT wr.*, j.skill_needed, j.location as job_location
+       FROM worker_ratings wr
+       LEFT JOIN jobs j ON wr.job_id = j.id
+       WHERE wr.worker_id = ?
+       ORDER BY wr.id DESC`,
+      [workerId]
+    );
+
+    res.json({
+      status: 'ok',
+      avg_rating: stats && stats.avg_rating ? stats.avg_rating : 0.0,
+      rating_count: stats && stats.rating_count ? stats.rating_count : 0,
+      reviews
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// 17. Check if Job is already rated
+app.get('/api/jobs/:id/rating', async (req, res) => {
+  try {
+    const jobId = req.params.id;
+    const workerId = req.query.worker_id;
+    let query = 'SELECT * FROM worker_ratings WHERE job_id = ?';
+    const params = [jobId];
+    if (workerId) {
+      query += ' AND worker_id = ?';
+      params.push(workerId);
+    }
+    const rating = await db.getAsync(query, params);
+    res.json({ status: 'ok', is_rated: !!rating, rating: rating || null });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -646,11 +937,14 @@ app.get('/employer/post-success/:id', async (req, res) => {
       return res.status(404).send('Job not found');
     }
 
-    // Direct matches with is_hired_by_other indicator
+    // Direct matches with is_hired_by_other indicator and ratings
     const matchedWorkers = await db.allAsync(
       `SELECT w.*, 
               (CASE WHEN w.status = 'HIRED' OR w.current_active_job_id IS NOT NULL THEN 1 ELSE 0 END) as is_hired_by_other,
-              w.current_location_zone as active_zone
+              w.current_location_zone as active_zone,
+              COALESCE((SELECT ROUND(AVG(rating), 1) FROM worker_ratings WHERE worker_id = w.id), 0.0) as avg_rating,
+              COALESCE((SELECT COUNT(*) FROM worker_ratings WHERE worker_id = w.id), 0) as rating_count,
+              COALESCE((SELECT COUNT(*) > 0 FROM worker_cv WHERE worker_id = w.id), 0) as has_cv
        FROM workers w 
        WHERE skill_type = ? AND location = ? 
        ORDER BY (CASE WHEN w.status = 'HIRED' OR w.current_active_job_id IS NOT NULL THEN 1 ELSE 0 END), id DESC`,
@@ -660,7 +954,10 @@ app.get('/employer/post-success/:id', async (req, res) => {
     const nearbyWorkers = await db.allAsync(
       `SELECT w.*, 
               (CASE WHEN w.status = 'HIRED' OR w.current_active_job_id IS NOT NULL THEN 1 ELSE 0 END) as is_hired_by_other,
-              w.current_location_zone as active_zone
+              w.current_location_zone as active_zone,
+              COALESCE((SELECT ROUND(AVG(rating), 1) FROM worker_ratings WHERE worker_id = w.id), 0.0) as avg_rating,
+              COALESCE((SELECT COUNT(*) FROM worker_ratings WHERE worker_id = w.id), 0) as rating_count,
+              COALESCE((SELECT COUNT(*) > 0 FROM worker_cv WHERE worker_id = w.id), 0) as has_cv
        FROM workers w 
        WHERE skill_type = ? AND location != ? 
        ORDER BY (CASE WHEN w.status = 'HIRED' OR w.current_active_job_id IS NOT NULL THEN 1 ELSE 0 END), id DESC LIMIT 4`,
@@ -703,7 +1000,10 @@ app.get('/employer/dashboard', async (req, res) => {
 
     for (const job of jobs) {
       const interestedWorkers = await db.allAsync(
-        `SELECT w.id as worker_id, w.name, w.phone_number, w.skill_type, w.location, w.available, w.status, ji.status as interest_status
+        `SELECT w.id as worker_id, w.name, w.phone_number, w.skill_type, w.location, w.available, w.status, ji.status as interest_status,
+                COALESCE((SELECT ROUND(AVG(rating), 1) FROM worker_ratings WHERE worker_id = w.id), 0.0) as avg_rating,
+                COALESCE((SELECT COUNT(*) FROM worker_ratings WHERE worker_id = w.id), 0) as rating_count,
+                COALESCE((SELECT COUNT(*) > 0 FROM worker_cv WHERE worker_id = w.id), 0) as has_cv
          FROM job_interests ji
          JOIN workers w ON ji.worker_id = w.id
          WHERE ji.job_id = ?

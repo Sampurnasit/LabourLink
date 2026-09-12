@@ -1,5 +1,26 @@
+require('dotenv').config();
+const { createClient } = require('@supabase/supabase-js');
 const sqlite3 = require('sqlite3').verbose();
 const path = require('path');
+
+// Initialize Supabase client
+const supabaseUrl = (process.env.SUPABASE_URL || '').trim();
+const supabaseAnonKey = (process.env.SUPABASE_ANON_KEY || '').trim();
+
+let supabase = null;
+let isSupabaseConfigured = false;
+
+if (supabaseUrl && supabaseAnonKey && supabaseUrl.startsWith('http')) {
+  try {
+    supabase = createClient(supabaseUrl, supabaseAnonKey);
+    isSupabaseConfigured = true;
+    console.log(`Connected to Supabase PostgreSQL at: ${supabaseUrl}`);
+  } catch (err) {
+    console.error('Error initializing Supabase client:', err.message);
+  }
+} else {
+  console.log('Running in local SQLite mode (Supabase not configured in .env)');
+}
 
 const dbPath = path.resolve(__dirname, 'labourlink.db');
 const db = new sqlite3.Database(dbPath, (err) => {
@@ -71,7 +92,44 @@ function initSchema() {
         UNIQUE (job_id, worker_id)
       )`, (err) => {
         if (err) return reject(err);
-        console.log('Database tables initialized: workers, jobs, job_interests.');
+      });
+
+      // 4. worker_cv table (Structured CV data, not file uploads)
+      db.run(`CREATE TABLE IF NOT EXISTS worker_cv (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        worker_id INTEGER UNIQUE NOT NULL,
+        full_name TEXT NOT NULL,
+        dob_or_age TEXT,
+        phone_number TEXT,
+        skills TEXT,
+        years_of_experience INTEGER DEFAULT 0,
+        previous_work TEXT,
+        work_location TEXT,
+        daily_wage_expectation TEXT,
+        availability_type TEXT,
+        languages TEXT,
+        about_me TEXT,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (worker_id) REFERENCES workers(id) ON DELETE CASCADE
+      )`, (err) => {
+        if (err) return reject(err);
+      });
+
+      // 5. worker_ratings table (1-5 stars with comments, preventing duplicate job ratings)
+      db.run(`CREATE TABLE IF NOT EXISTS worker_ratings (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        worker_id INTEGER NOT NULL,
+        employer_phone TEXT,
+        job_id INTEGER NOT NULL,
+        rating REAL NOT NULL CHECK (rating >= 1.0 AND rating <= 5.0),
+        comment TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (worker_id) REFERENCES workers(id) ON DELETE CASCADE,
+        FOREIGN KEY (job_id) REFERENCES jobs(id) ON DELETE CASCADE,
+        UNIQUE (job_id, worker_id)
+      )`, (err) => {
+        if (err) return reject(err);
+        console.log('Database tables initialized: workers, jobs, job_interests, worker_cv, worker_ratings.');
         resolve();
       });
     });
@@ -112,5 +170,34 @@ db.allAsync = function (sql, params = []) {
 };
 
 db.initSchema = initSchema;
+db.supabase = supabase;
+db.isSupabaseConfigured = isSupabaseConfigured;
+
+// Helper to sync local records to Supabase cloud
+db.syncToSupabase = async function() {
+  if (!isSupabaseConfigured || !supabase) {
+    return { success: false, message: 'Supabase is not configured' };
+  }
+  try {
+    const workers = await db.allAsync('SELECT name, phone_number, skill_type, location, available FROM workers');
+    const formattedWorkers = workers.map(w => ({
+      name: w.name,
+      phone_number: w.phone_number,
+      skill_type: w.skill_type,
+      location: w.location,
+      available: w.available === 1
+    }));
+    await supabase.from('workers').upsert(formattedWorkers, { onConflict: 'phone_number' });
+
+    const jobs = await db.allAsync('SELECT employer_name, employer_phone, skill_needed, location, wage_offered, date_needed, status FROM jobs');
+    await supabase.from('jobs').insert(jobs);
+
+    return { success: true, workersSynced: workers.length, jobsSynced: jobs.length };
+  } catch (err) {
+    return { success: false, error: err.message };
+  }
+};
 
 module.exports = db;
+module.exports.supabase = supabase;
+module.exports.isSupabaseConfigured = isSupabaseConfigured;

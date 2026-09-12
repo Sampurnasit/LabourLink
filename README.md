@@ -25,7 +25,7 @@
 
 - **Backend & Web Portal**:
   - **Runtime & Server**: Node.js & Express.js
-  - **Database**: SQLite3 (`better-sqlite3` / `sqlite3`)
+  - **Database**: Supabase (PostgreSQL with `@supabase/supabase-js`)
   - **Templating**: EJS with custom modern CSS styling
   - **SMS Integration**: Twilio REST API
 
@@ -49,7 +49,8 @@ LabourLink/
 │   └── ...
 ├── public/                # Static assets (CSS stylesheets, client JS)
 ├── views/                 # EJS templates (Web portal pages & partials)
-├── database.js            # SQLite database schema and connection initialization
+├── database.js            # Supabase client connection initialization
+├── supabase-schema.sql    # PostgreSQL DDL table schemas & RLS policies
 ├── seed.js                # Database seeding utility for testing
 ├── server.js              # Express application with REST API endpoints
 ├── test-flow.js           # End-to-end API test workflow script
@@ -68,25 +69,32 @@ LabourLink/
    npm install
    ```
 
-2. **Configure Environment Variables**:
+2. **Set Up Database in Supabase**:
+   - Create a free project at [supabase.com](https://supabase.com).
+   - Open the **SQL Editor** in your Supabase project dashboard.
+   - Paste and run the contents of `supabase-schema.sql` to create `workers`, `jobs`, and `job_interests` tables with proper indexes and RLS policies.
+
+3. **Configure Environment Variables**:
    Copy `.env.example` to `.env`:
    ```bash
    cp .env.example .env
    ```
-   Fill in your Twilio credentials and server port:
+   Fill in your Supabase credentials:
    ```env
    PORT=3000
+   SUPABASE_URL=https://your-project-ref.supabase.co
+   SUPABASE_ANON_KEY=your-anon-public-key
    TWILIO_ACCOUNT_SID=your_twilio_account_sid
    TWILIO_AUTH_TOKEN=your_twilio_auth_token
    TWILIO_PHONE_NUMBER=your_twilio_phone_number
    ```
 
-3. **Initialize & Seed Database (Optional)**:
+4. **Seed Database (Optional)**:
    ```bash
    node seed.js
    ```
 
-4. **Start the Server**:
+5. **Start the Server**:
    ```bash
    npm start
    # or for development:

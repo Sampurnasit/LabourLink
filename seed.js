@@ -1,17 +1,17 @@
-const db = require('./database');
+const supabase = require('./database');
 
 async function seed() {
-  console.log('Seeding demo data for LabourLink...');
+  console.log('Seeding demo data for LabourLink in Supabase...');
 
   // Clear existing records
-  await db.runAsync('DELETE FROM job_interests');
-  await db.runAsync('DELETE FROM jobs');
-  await db.runAsync('DELETE FROM workers');
-  try {
-    await db.runAsync("DELETE FROM sqlite_sequence WHERE name IN ('workers', 'jobs', 'job_interests')");
-  } catch (e) {
-    // sqlite_sequence may not exist yet if fresh, ignore
-  }
+  const { error: delErr1 } = await supabase.from('job_interests').delete().neq('id', 0);
+  if (delErr1) console.warn('Note deleting job_interests:', delErr1.message);
+
+  const { error: delErr2 } = await supabase.from('jobs').delete().neq('id', 0);
+  if (delErr2) console.warn('Note deleting jobs:', delErr2.message);
+
+  const { error: delErr3 } = await supabase.from('workers').delete().neq('id', 0);
+  if (delErr3) console.warn('Note deleting workers:', delErr3.message);
 
   // 1. Seed Workers
   const workers = [
@@ -29,15 +29,22 @@ async function seed() {
     { name: 'Santosh Naik', phone_number: '9876500012', skill_type: 'Other', location: 'Indiranagar', available: 1 }
   ];
 
-  const workerMap = {};
-  for (const w of workers) {
-    const res = await db.runAsync(
-      `INSERT INTO workers (name, phone_number, skill_type, location, available) VALUES (?, ?, ?, ?, ?)`,
-      [w.name, w.phone_number, w.skill_type, w.location, w.available]
-    );
-    workerMap[w.phone_number] = res.lastID;
+  const { data: insertedWorkers, error: wErr } = await supabase
+    .from('workers')
+    .insert(workers)
+    .select();
+
+  if (wErr) {
+    throw new Error(`Failed to seed workers: ${wErr.message}`);
   }
-  console.log(`✓ Seeded ${workers.length} workers`);
+  console.log(`✓ Seeded ${insertedWorkers ? insertedWorkers.length : 0} workers`);
+
+  const workerMap = {};
+  if (insertedWorkers) {
+    for (const w of insertedWorkers) {
+      workerMap[w.phone_number] = w.id;
+    }
+  }
 
   // 2. Seed Jobs
   const jobs = [
@@ -88,36 +95,48 @@ async function seed() {
     }
   ];
 
-  const jobIds = [];
-  for (const j of jobs) {
-    const res = await db.runAsync(
-      `INSERT INTO jobs (employer_name, employer_phone, skill_needed, location, wage_offered, date_needed, status)
-       VALUES (?, ?, ?, ?, ?, ?, ?)`,
-      [j.employer_name, j.employer_phone, j.skill_needed, j.location, j.wage_offered, j.date_needed, j.status]
-    );
-    jobIds.push(res.lastID);
+  const { data: insertedJobs, error: jErr } = await supabase
+    .from('jobs')
+    .insert(jobs)
+    .select();
+
+  if (jErr) {
+    throw new Error(`Failed to seed jobs: ${jErr.message}`);
   }
-  console.log(`✓ Seeded ${jobs.length} jobs`);
+  console.log(`✓ Seeded ${insertedJobs ? insertedJobs.length : 0} jobs`);
 
   // 3. Seed sample interests using dynamic IDs
-  // Anand Buildcon (Job 0) has Ramesh Kumar (9876500001) interested
-  await db.runAsync(
-    `INSERT INTO job_interests (job_id, worker_id, status) VALUES (?, ?, 'interested')`,
-    [jobIds[0], workerMap['9876500001']]
-  );
-  // Arun Mehra (Job 3) has Mohammed Rafiq (9876500003) interested
-  await db.runAsync(
-    `INSERT INTO job_interests (job_id, worker_id, status) VALUES (?, ?, 'interested')`,
-    [jobIds[3], workerMap['9876500003']]
-  );
-  // Kavita Reddy (Job 4) confirmed Sunita Devi (9876500005)
-  await db.runAsync(
-    `INSERT INTO job_interests (job_id, worker_id, status) VALUES (?, ?, 'confirmed')`,
-    [jobIds[4], workerMap['9876500005']]
-  );
+  if (insertedJobs && insertedJobs.length >= 5 && insertedWorkers) {
+    const interests = [
+      {
+        job_id: insertedJobs[0].id,
+        worker_id: workerMap['9876500001'],
+        status: 'interested'
+      },
+      {
+        job_id: insertedJobs[3].id,
+        worker_id: workerMap['9876500003'],
+        status: 'interested'
+      },
+      {
+        job_id: insertedJobs[4].id,
+        worker_id: workerMap['9876500005'],
+        status: 'confirmed'
+      }
+    ];
 
-  console.log('✓ Seeded sample job interests');
-  console.log('Database seeding complete!');
+    const { error: iErr } = await supabase
+      .from('job_interests')
+      .insert(interests);
+
+    if (iErr) {
+      throw new Error(`Failed to seed job interests: ${iErr.message}`);
+    }
+
+    console.log('✓ Seeded sample job interests');
+  }
+
+  console.log('Supabase database seeding complete!');
 }
 
 if (require.main === module) {

@@ -2,7 +2,7 @@ require('dotenv').config();
 const express = require('express');
 const path = require('path');
 const cors = require('cors');
-const db = require('./database');
+const supabase = require('./database');
 
 const app = express();
 const port = process.env.PORT || 3000;
@@ -39,19 +39,30 @@ function cleanPhone(phone) {
 // 1. Platform Statistics
 app.get('/api/stats', async (req, res) => {
   try {
-    const totalWorkers = await db.getAsync('SELECT COUNT(*) as count FROM workers');
-    const availableWorkers = await db.getAsync('SELECT COUNT(*) as count FROM workers WHERE available = 1');
-    const openJobs = await db.getAsync("SELECT COUNT(*) as count FROM jobs WHERE status = 'open'");
-    const filledJobs = await db.getAsync("SELECT COUNT(*) as count FROM jobs WHERE status = 'filled'");
-    const totalInterests = await db.getAsync('SELECT COUNT(*) as count FROM job_interests');
+    const [
+      { count: totalWorkers, error: err1 },
+      { count: availableWorkers, error: err2 },
+      { count: openJobs, error: err3 },
+      { count: filledJobs, error: err4 },
+      { count: totalInterests, error: err5 }
+    ] = await Promise.all([
+      supabase.from('workers').select('*', { count: 'exact', head: true }),
+      supabase.from('workers').select('*', { count: 'exact', head: true }).eq('available', 1),
+      supabase.from('jobs').select('*', { count: 'exact', head: true }).eq('status', 'open'),
+      supabase.from('jobs').select('*', { count: 'exact', head: true }).eq('status', 'filled'),
+      supabase.from('job_interests').select('*', { count: 'exact', head: true })
+    ]);
+
+    const firstErr = err1 || err2 || err3 || err4 || err5;
+    if (firstErr) throw firstErr;
 
     res.json({
       status: 'ok',
-      totalWorkers: totalWorkers ? totalWorkers.count : 0,
-      availableWorkers: availableWorkers ? availableWorkers.count : 0,
-      openJobs: openJobs ? openJobs.count : 0,
-      filledJobs: filledJobs ? filledJobs.count : 0,
-      totalInterests: totalInterests ? totalInterests.count : 0
+      totalWorkers: totalWorkers || 0,
+      availableWorkers: availableWorkers || 0,
+      openJobs: openJobs || 0,
+      filledJobs: filledJobs || 0,
+      totalInterests: totalInterests || 0
     });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -62,21 +73,20 @@ app.get('/api/stats', async (req, res) => {
 app.get('/api/jobs', async (req, res) => {
   try {
     const { skill, location } = req.query;
-    let sql = "SELECT * FROM jobs WHERE status = 'open'";
-    const params = [];
+    let query = supabase.from('jobs').select('*').eq('status', 'open');
 
     if (skill) {
-      sql += ' AND skill_needed = ?';
-      params.push(skill);
+      query = query.eq('skill_needed', skill);
     }
     if (location) {
-      sql += ' AND location = ?';
-      params.push(location);
+      query = query.eq('location', location);
     }
 
-    sql += ' ORDER BY id DESC';
-    const jobs = await db.allAsync(sql, params);
-    res.json({ status: 'ok', jobs });
+    query = query.order('id', { ascending: false });
+    const { data: jobs, error } = await query;
+    if (error) throw error;
+
+    res.json({ status: 'ok', jobs: jobs || [] });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -92,13 +102,21 @@ app.post('/api/jobs', async (req, res) => {
       return res.status(400).json({ error: 'Please provide all required job fields' });
     }
 
-    const result = await db.runAsync(
-      `INSERT INTO jobs (employer_name, employer_phone, skill_needed, location, wage_offered, date_needed, status)
-       VALUES (?, ?, ?, ?, ?, ?, 'open')`,
-      [employer_name.trim(), phone, skill_needed, location, wage_offered.trim(), date_needed || 'Today']
-    );
+    const { data: newJob, error } = await supabase
+      .from('jobs')
+      .insert({
+        employer_name: employer_name.trim(),
+        employer_phone: phone,
+        skill_needed,
+        location,
+        wage_offered: wage_offered.trim(),
+        date_needed: date_needed || 'Today',
+        status: 'open'
+      })
+      .select()
+      .single();
 
-    const newJob = await db.getAsync('SELECT * FROM jobs WHERE id = ?', [result.lastID]);
+    if (error) throw error;
     res.status(201).json({ status: 'ok', job: newJob });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -108,28 +126,43 @@ app.post('/api/jobs', async (req, res) => {
 // 4. Get Single Job and Instant Matching Workers
 app.get('/api/jobs/:id/matches', async (req, res) => {
   try {
-    const job = await db.getAsync('SELECT * FROM jobs WHERE id = ?', [req.params.id]);
+    const { data: job, error: jobError } = await supabase
+      .from('jobs')
+      .select('*')
+      .eq('id', req.params.id)
+      .maybeSingle();
+
+    if (jobError) throw jobError;
     if (!job) {
       return res.status(404).json({ error: 'Job not found' });
     }
 
     // Direct matches: same skill + same location + available = 1
-    const matchedWorkers = await db.allAsync(
-      'SELECT * FROM workers WHERE skill_type = ? AND location = ? AND available = 1 ORDER BY id DESC',
-      [job.skill_needed, job.location]
-    );
+    const { data: matchedWorkers, error: matchErr } = await supabase
+      .from('workers')
+      .select('*')
+      .eq('skill_type', job.skill_needed)
+      .eq('location', job.location)
+      .eq('available', 1)
+      .order('id', { ascending: false });
+    if (matchErr) throw matchErr;
 
     // Nearby citywide workers with same skill
-    const nearbyWorkers = await db.allAsync(
-      'SELECT * FROM workers WHERE skill_type = ? AND location != ? AND available = 1 ORDER BY id DESC LIMIT 5',
-      [job.skill_needed, job.location]
-    );
+    const { data: nearbyWorkers, error: nearErr } = await supabase
+      .from('workers')
+      .select('*')
+      .eq('skill_type', job.skill_needed)
+      .neq('location', job.location)
+      .eq('available', 1)
+      .order('id', { ascending: false })
+      .limit(5);
+    if (nearErr) throw nearErr;
 
     res.json({
       status: 'ok',
       job,
-      matchedWorkers,
-      nearbyWorkers
+      matchedWorkers: matchedWorkers || [],
+      nearbyWorkers: nearbyWorkers || []
     });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -147,18 +180,22 @@ app.post('/api/workers/register', async (req, res) => {
       return res.status(400).json({ error: 'Please provide all required worker fields' });
     }
 
-    await db.runAsync(
-      `INSERT INTO workers (name, phone_number, skill_type, location, available)
-       VALUES (?, ?, ?, ?, ?)
-       ON CONFLICT(phone_number) DO UPDATE SET
-         name = excluded.name,
-         skill_type = excluded.skill_type,
-         location = excluded.location,
-         available = excluded.available`,
-      [name.trim(), phone, skill_type, location, isAvailable]
-    );
+    const { data: worker, error } = await supabase
+      .from('workers')
+      .upsert(
+        {
+          name: name.trim(),
+          phone_number: phone,
+          skill_type,
+          location,
+          available: isAvailable
+        },
+        { onConflict: 'phone_number' }
+      )
+      .select()
+      .single();
 
-    const worker = await db.getAsync('SELECT * FROM workers WHERE phone_number = ?', [phone]);
+    if (error) throw error;
     res.json({ status: 'ok', worker });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -169,39 +206,57 @@ app.post('/api/workers/register', async (req, res) => {
 app.get('/api/workers/:phone', async (req, res) => {
   try {
     const phone = cleanPhone(req.params.phone);
-    const worker = await db.getAsync('SELECT * FROM workers WHERE phone_number = ?', [phone]);
+    const { data: worker, error: workerErr } = await supabase
+      .from('workers')
+      .select('*')
+      .eq('phone_number', phone)
+      .maybeSingle();
 
+    if (workerErr) throw workerErr;
     if (!worker) {
       return res.status(404).json({ error: 'Worker not found' });
     }
 
     // Matched open jobs in worker's area
-    const matchedJobs = await db.allAsync(
-      "SELECT * FROM jobs WHERE skill_needed = ? AND location = ? AND status = 'open' ORDER BY id DESC",
-      [worker.skill_type, worker.location]
-    );
+    const { data: matchedJobs, error: mErr } = await supabase
+      .from('jobs')
+      .select('*')
+      .eq('skill_needed', worker.skill_type)
+      .eq('location', worker.location)
+      .eq('status', 'open')
+      .order('id', { ascending: false });
+    if (mErr) throw mErr;
 
     // Other open jobs in that skill citywide
-    const otherSkillJobs = await db.allAsync(
-      "SELECT * FROM jobs WHERE skill_needed = ? AND location != ? AND status = 'open' ORDER BY id DESC LIMIT 6",
-      [worker.skill_type, worker.location]
-    );
+    const { data: otherSkillJobs, error: oErr } = await supabase
+      .from('jobs')
+      .select('*')
+      .eq('skill_needed', worker.skill_type)
+      .neq('location', worker.location)
+      .eq('status', 'open')
+      .order('id', { ascending: false })
+      .limit(6);
+    if (oErr) throw oErr;
 
     // Jobs the worker has applied for or been confirmed for
-    const appliedJobs = await db.allAsync(
-      `SELECT j.*, ji.status as interest_status, ji.created_at as interest_date
-       FROM job_interests ji
-       JOIN jobs j ON ji.job_id = j.id
-       WHERE ji.worker_id = ?
-       ORDER BY ji.id DESC`,
-      [worker.id]
-    );
+    const { data: interests, error: iErr } = await supabase
+      .from('job_interests')
+      .select('id, status, created_at, jobs(*)')
+      .eq('worker_id', worker.id)
+      .order('id', { ascending: false });
+    if (iErr) throw iErr;
+
+    const appliedJobs = (interests || []).map((i) => ({
+      ...(i.jobs || {}),
+      interest_status: i.status,
+      interest_date: i.created_at
+    }));
 
     res.json({
       status: 'ok',
       worker,
-      matchedJobs,
-      otherSkillJobs,
+      matchedJobs: matchedJobs || [],
+      otherSkillJobs: otherSkillJobs || [],
       appliedJobs
     });
   } catch (err) {
@@ -217,13 +272,14 @@ app.post('/api/workers/interest', async (req, res) => {
       return res.status(400).json({ error: 'worker_id and job_id are required' });
     }
 
-    await db.runAsync(
-      `INSERT INTO job_interests (job_id, worker_id, status)
-       VALUES (?, ?, 'interested')
-       ON CONFLICT(job_id, worker_id) DO NOTHING`,
-      [job_id, worker_id]
-    );
+    const { error } = await supabase
+      .from('job_interests')
+      .upsert(
+        { job_id, worker_id, status: 'interested' },
+        { onConflict: 'job_id,worker_id', ignoreDuplicates: true }
+      );
 
+    if (error) throw error;
     res.json({ status: 'ok', message: 'Interest registered successfully' });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -236,9 +292,14 @@ app.post('/api/workers/toggle-availability', async (req, res) => {
     const phone = cleanPhone(req.body.phone);
     const available = req.body.available ? 1 : 0;
 
-    await db.runAsync('UPDATE workers SET available = ? WHERE phone_number = ?', [available, phone]);
-    const worker = await db.getAsync('SELECT * FROM workers WHERE phone_number = ?', [phone]);
+    const { data: worker, error } = await supabase
+      .from('workers')
+      .update({ available })
+      .eq('phone_number', phone)
+      .select()
+      .single();
 
+    if (error) throw error;
     res.json({ status: 'ok', worker });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -249,24 +310,44 @@ app.post('/api/workers/toggle-availability', async (req, res) => {
 app.get('/api/employers/:phone/jobs', async (req, res) => {
   try {
     const phone = cleanPhone(req.params.phone);
-    const jobs = await db.allAsync(
-      'SELECT * FROM jobs WHERE employer_phone = ? ORDER BY id DESC',
-      [phone]
-    );
+    const { data: jobs, error: jErr } = await supabase
+      .from('jobs')
+      .select('*')
+      .eq('employer_phone', phone)
+      .order('id', { ascending: false });
 
-    for (const job of jobs) {
-      const interestedWorkers = await db.allAsync(
-        `SELECT w.id as worker_id, w.name, w.phone_number, w.skill_type, w.location, w.available, ji.status
-         FROM job_interests ji
-         JOIN workers w ON ji.worker_id = w.id
-         WHERE ji.job_id = ?
-         ORDER BY (CASE WHEN ji.status = 'confirmed' THEN 0 ELSE 1 END), ji.id DESC`,
-        [job.id]
-      );
-      job.interestedWorkers = interestedWorkers;
+    if (jErr) throw jErr;
+
+    const jobList = jobs || [];
+    for (const job of jobList) {
+      const { data: interests, error: iErr } = await supabase
+        .from('job_interests')
+        .select('id, status, workers(id, name, phone_number, skill_type, location, available)')
+        .eq('job_id', job.id)
+        .order('id', { ascending: false });
+
+      if (iErr) throw iErr;
+
+      const workersList = (interests || []).map((i) => ({
+        worker_id: i.workers?.id,
+        name: i.workers?.name,
+        phone_number: i.workers?.phone_number,
+        skill_type: i.workers?.skill_type,
+        location: i.workers?.location,
+        available: i.workers?.available,
+        status: i.status
+      }));
+
+      workersList.sort((a, b) => {
+        if (a.status === 'confirmed' && b.status !== 'confirmed') return -1;
+        if (a.status !== 'confirmed' && b.status === 'confirmed') return 1;
+        return 0;
+      });
+
+      job.interestedWorkers = workersList;
     }
 
-    res.json({ status: 'ok', jobs });
+    res.json({ status: 'ok', jobs: jobList });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -280,11 +361,18 @@ app.post('/api/employers/confirm-worker', async (req, res) => {
       return res.status(400).json({ error: 'job_id and worker_id are required' });
     }
 
-    await db.runAsync(
-      "UPDATE job_interests SET status = 'confirmed' WHERE job_id = ? AND worker_id = ?",
-      [job_id, worker_id]
-    );
-    await db.runAsync("UPDATE jobs SET status = 'filled' WHERE id = ?", [job_id]);
+    const { error: iErr } = await supabase
+      .from('job_interests')
+      .update({ status: 'confirmed' })
+      .eq('job_id', job_id)
+      .eq('worker_id', worker_id);
+    if (iErr) throw iErr;
+
+    const { error: jErr } = await supabase
+      .from('jobs')
+      .update({ status: 'filled' })
+      .eq('id', job_id);
+    if (jErr) throw jErr;
 
     res.json({ status: 'ok', message: 'Worker confirmed and job marked filled' });
   } catch (err) {
@@ -299,23 +387,28 @@ app.post('/api/employers/confirm-worker', async (req, res) => {
 // Home Page
 app.get('/', async (req, res) => {
   try {
-    const totalWorkersRow = await db.getAsync('SELECT COUNT(*) as count FROM workers');
-    const availWorkersRow = await db.getAsync('SELECT COUNT(*) as count FROM workers WHERE available = 1');
-    const openJobsRow = await db.getAsync("SELECT COUNT(*) as count FROM jobs WHERE status = 'open'");
-    const totalInterestsRow = await db.getAsync('SELECT COUNT(*) as count FROM job_interests');
+    const [
+      { count: totalWorkers },
+      { count: availableWorkers },
+      { count: openJobs },
+      { count: totalInterests },
+      { data: recentJobs }
+    ] = await Promise.all([
+      supabase.from('workers').select('*', { count: 'exact', head: true }),
+      supabase.from('workers').select('*', { count: 'exact', head: true }).eq('available', 1),
+      supabase.from('jobs').select('*', { count: 'exact', head: true }).eq('status', 'open'),
+      supabase.from('job_interests').select('*', { count: 'exact', head: true }),
+      supabase.from('jobs').select('*').eq('status', 'open').order('id', { ascending: false }).limit(6)
+    ]);
 
     const stats = {
-      totalWorkers: totalWorkersRow ? totalWorkersRow.count : 0,
-      availableWorkers: availWorkersRow ? availWorkersRow.count : 0,
-      openJobs: openJobsRow ? openJobsRow.count : 0,
-      totalInterests: totalInterestsRow ? totalInterestsRow.count : 0
+      totalWorkers: totalWorkers || 0,
+      availableWorkers: availableWorkers || 0,
+      openJobs: openJobs || 0,
+      totalInterests: totalInterests || 0
     };
 
-    const recentJobs = await db.allAsync(
-      "SELECT * FROM jobs WHERE status = 'open' ORDER BY id DESC LIMIT 6"
-    );
-
-    res.render('index', { stats, recentJobs });
+    res.render('index', { stats, recentJobs: recentJobs || [] });
   } catch (err) {
     console.error('Error rendering home page:', err);
     res.status(500).send('Internal Server Error');
@@ -339,16 +432,20 @@ app.post('/worker/register', async (req, res) => {
       });
     }
 
-    await db.runAsync(
-      `INSERT INTO workers (name, phone_number, skill_type, location, available)
-       VALUES (?, ?, ?, ?, ?)
-       ON CONFLICT(phone_number) DO UPDATE SET
-         name = excluded.name,
-         skill_type = excluded.skill_type,
-         location = excluded.location,
-         available = excluded.available`,
-      [name.trim(), phone, skill_type, location, isAvailable]
-    );
+    const { error } = await supabase
+      .from('workers')
+      .upsert(
+        {
+          name: name.trim(),
+          phone_number: phone,
+          skill_type,
+          location,
+          available: isAvailable
+        },
+        { onConflict: 'phone_number' }
+      );
+
+    if (error) throw error;
 
     res.redirect(`/worker/dashboard?phone=${encodeURIComponent(phone)}&registered=1`);
   } catch (err) {
@@ -385,7 +482,13 @@ app.get('/worker/dashboard', async (req, res) => {
       });
     }
 
-    const worker = await db.getAsync('SELECT * FROM workers WHERE phone_number = ?', [phone]);
+    const { data: worker, error: workerErr } = await supabase
+      .from('workers')
+      .select('*')
+      .eq('phone_number', phone)
+      .maybeSingle();
+
+    if (workerErr) throw workerErr;
 
     if (!worker) {
       return res.render('worker-dashboard', {
@@ -399,32 +502,42 @@ app.get('/worker/dashboard', async (req, res) => {
       });
     }
 
-    const matchedJobs = await db.allAsync(
-      "SELECT * FROM jobs WHERE skill_needed = ? AND location = ? AND status = 'open' ORDER BY id DESC",
-      [worker.skill_type, worker.location]
-    );
+    const { data: matchedJobs } = await supabase
+      .from('jobs')
+      .select('*')
+      .eq('skill_needed', worker.skill_type)
+      .eq('location', worker.location)
+      .eq('status', 'open')
+      .order('id', { ascending: false });
 
-    const otherSkillJobs = await db.allAsync(
-      "SELECT * FROM jobs WHERE skill_needed = ? AND location != ? AND status = 'open' ORDER BY id DESC LIMIT 6",
-      [worker.skill_type, worker.location]
-    );
+    const { data: otherSkillJobs } = await supabase
+      .from('jobs')
+      .select('*')
+      .eq('skill_needed', worker.skill_type)
+      .neq('location', worker.location)
+      .eq('status', 'open')
+      .order('id', { ascending: false })
+      .limit(6);
 
-    const appliedJobs = await db.allAsync(
-      `SELECT j.*, ji.status as interest_status, ji.created_at as interest_date
-       FROM job_interests ji
-       JOIN jobs j ON ji.job_id = j.id
-       WHERE ji.worker_id = ?
-       ORDER BY ji.id DESC`,
-      [worker.id]
-    );
+    const { data: interests } = await supabase
+      .from('job_interests')
+      .select('id, status, created_at, jobs(*)')
+      .eq('worker_id', worker.id)
+      .order('id', { ascending: false });
+
+    const appliedJobs = (interests || []).map((i) => ({
+      ...(i.jobs || {}),
+      interest_status: i.status,
+      interest_date: i.created_at
+    }));
 
     const interestedJobIds = appliedJobs.map((j) => j.id);
 
     res.render('worker-dashboard', {
       worker,
       phone,
-      matchedJobs,
-      otherSkillJobs,
+      matchedJobs: matchedJobs || [],
+      otherSkillJobs: otherSkillJobs || [],
       appliedJobs,
       interestedJobIds,
       successMessage
@@ -443,12 +556,12 @@ app.post('/worker/interest', async (req, res) => {
       return res.status(400).redirect('/worker/dashboard');
     }
 
-    await db.runAsync(
-      `INSERT INTO job_interests (job_id, worker_id, status)
-       VALUES (?, ?, 'interested')
-       ON CONFLICT(job_id, worker_id) DO NOTHING`,
-      [job_id, worker_id]
-    );
+    await supabase
+      .from('job_interests')
+      .upsert(
+        { job_id, worker_id, status: 'interested' },
+        { onConflict: 'job_id,worker_id', ignoreDuplicates: true }
+      );
 
     res.redirect(`/worker/dashboard?phone=${encodeURIComponent(phone)}&interested=1`);
   } catch (err) {
@@ -463,7 +576,11 @@ app.post('/worker/toggle-availability', async (req, res) => {
     const phone = cleanPhone(req.body.phone);
     const available = req.body.available === '1' ? 1 : 0;
 
-    await db.runAsync('UPDATE workers SET available = ? WHERE phone_number = ?', [available, phone]);
+    await supabase
+      .from('workers')
+      .update({ available })
+      .eq('phone_number', phone);
+
     res.redirect(`/worker/dashboard?phone=${encodeURIComponent(phone)}&avail_updated=1`);
   } catch (err) {
     console.error('Error toggling availability:', err);
@@ -487,13 +604,23 @@ app.post('/employer/post-job', async (req, res) => {
       });
     }
 
-    const result = await db.runAsync(
-      `INSERT INTO jobs (employer_name, employer_phone, skill_needed, location, wage_offered, date_needed, status)
-       VALUES (?, ?, ?, ?, ?, ?, 'open')`,
-      [employer_name.trim(), phone, skill_needed, location, wage_offered.trim(), date_needed || 'Today']
-    );
+    const { data: newJob, error } = await supabase
+      .from('jobs')
+      .insert({
+        employer_name: employer_name.trim(),
+        employer_phone: phone,
+        skill_needed,
+        location,
+        wage_offered: wage_offered.trim(),
+        date_needed: date_needed || 'Today',
+        status: 'open'
+      })
+      .select('id')
+      .single();
 
-    res.redirect(`/employer/post-success/${result.lastID}`);
+    if (error) throw error;
+
+    res.redirect(`/employer/post-success/${newJob.id}`);
   } catch (err) {
     console.error('Error creating job:', err);
     res.status(500).render('employer-post-job', {
@@ -506,23 +633,39 @@ app.post('/employer/post-job', async (req, res) => {
 app.get('/employer/post-success/:id', async (req, res) => {
   try {
     const jobId = req.params.id;
-    const job = await db.getAsync('SELECT * FROM jobs WHERE id = ?', [jobId]);
+    const { data: job, error: jobErr } = await supabase
+      .from('jobs')
+      .select('*')
+      .eq('id', jobId)
+      .maybeSingle();
 
+    if (jobErr) throw jobErr;
     if (!job) {
       return res.status(404).send('Job not found');
     }
 
-    const matchedWorkers = await db.allAsync(
-      'SELECT * FROM workers WHERE skill_type = ? AND location = ? AND available = 1 ORDER BY id DESC',
-      [job.skill_needed, job.location]
-    );
+    const { data: matchedWorkers } = await supabase
+      .from('workers')
+      .select('*')
+      .eq('skill_type', job.skill_needed)
+      .eq('location', job.location)
+      .eq('available', 1)
+      .order('id', { ascending: false });
 
-    const nearbyWorkers = await db.allAsync(
-      'SELECT * FROM workers WHERE skill_type = ? AND location != ? AND available = 1 ORDER BY id DESC LIMIT 4',
-      [job.skill_needed, job.location]
-    );
+    const { data: nearbyWorkers } = await supabase
+      .from('workers')
+      .select('*')
+      .eq('skill_type', job.skill_needed)
+      .neq('location', job.location)
+      .eq('available', 1)
+      .order('id', { ascending: false })
+      .limit(4);
 
-    res.render('employer-post-success', { job, matchedWorkers, nearbyWorkers });
+    res.render('employer-post-success', {
+      job,
+      matchedWorkers: matchedWorkers || [],
+      nearbyWorkers: nearbyWorkers || []
+    });
   } catch (err) {
     console.error('Error loading post success:', err);
     res.status(500).send('Internal Server Error');
@@ -547,25 +690,45 @@ app.get('/employer/dashboard', async (req, res) => {
       });
     }
 
-    const jobs = await db.allAsync(
-      'SELECT * FROM jobs WHERE employer_phone = ? ORDER BY id DESC',
-      [phone]
-    );
+    const { data: jobs, error: jErr } = await supabase
+      .from('jobs')
+      .select('*')
+      .eq('employer_phone', phone)
+      .order('id', { ascending: false });
 
-    for (const job of jobs) {
-      const interestedWorkers = await db.allAsync(
-        `SELECT w.id as worker_id, w.name, w.phone_number, w.skill_type, w.location, w.available, ji.status
-         FROM job_interests ji
-         JOIN workers w ON ji.worker_id = w.id
-         WHERE ji.job_id = ?
-         ORDER BY (CASE WHEN ji.status = 'confirmed' THEN 0 ELSE 1 END), ji.id DESC`,
-        [job.id]
-      );
-      job.interestedWorkers = interestedWorkers;
+    if (jErr) throw jErr;
+
+    const jobList = jobs || [];
+    for (const job of jobList) {
+      const { data: interests, error: iErr } = await supabase
+        .from('job_interests')
+        .select('id, status, workers(id, name, phone_number, skill_type, location, available)')
+        .eq('job_id', job.id)
+        .order('id', { ascending: false });
+
+      if (iErr) throw iErr;
+
+      const workersList = (interests || []).map((i) => ({
+        worker_id: i.workers?.id,
+        name: i.workers?.name,
+        phone_number: i.workers?.phone_number,
+        skill_type: i.workers?.skill_type,
+        location: i.workers?.location,
+        available: i.workers?.available,
+        status: i.status
+      }));
+
+      workersList.sort((a, b) => {
+        if (a.status === 'confirmed' && b.status !== 'confirmed') return -1;
+        if (a.status !== 'confirmed' && b.status === 'confirmed') return 1;
+        return 0;
+      });
+
+      job.interestedWorkers = workersList;
     }
 
     res.render('employer-dashboard', {
-      jobs,
+      jobs: jobList,
       phone,
       successMessage
     });
@@ -583,11 +746,16 @@ app.post('/employer/confirm-worker', async (req, res) => {
       return res.status(400).redirect('/employer/dashboard');
     }
 
-    await db.runAsync(
-      "UPDATE job_interests SET status = 'confirmed' WHERE job_id = ? AND worker_id = ?",
-      [job_id, worker_id]
-    );
-    await db.runAsync("UPDATE jobs SET status = 'filled' WHERE id = ?", [job_id]);
+    await supabase
+      .from('job_interests')
+      .update({ status: 'confirmed' })
+      .eq('job_id', job_id)
+      .eq('worker_id', worker_id);
+
+    await supabase
+      .from('jobs')
+      .update({ status: 'filled' })
+      .eq('id', job_id);
 
     res.redirect(`/employer/dashboard?phone=${encodeURIComponent(employer_phone)}&confirmed=1`);
   } catch (err) {
@@ -600,23 +768,21 @@ app.post('/employer/confirm-worker', async (req, res) => {
 app.get('/jobs', async (req, res) => {
   try {
     const { skill, location } = req.query;
-    let sql = "SELECT * FROM jobs WHERE status = 'open'";
-    const params = [];
+    let query = supabase.from('jobs').select('*').eq('status', 'open');
 
     if (skill) {
-      sql += ' AND skill_needed = ?';
-      params.push(skill);
+      query = query.eq('skill_needed', skill);
     }
     if (location) {
-      sql += ' AND location = ?';
-      params.push(location);
+      query = query.eq('location', location);
     }
 
-    sql += ' ORDER BY id DESC';
-    const jobs = await db.allAsync(sql, params);
+    query = query.order('id', { ascending: false });
+    const { data: jobs, error } = await query;
+    if (error) throw error;
 
     res.render('jobs-board', {
-      jobs,
+      jobs: jobs || [],
       selectedSkill: skill || '',
       selectedLocation: location || ''
     });

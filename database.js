@@ -1,102 +1,57 @@
-const sqlite3 = require('sqlite3').verbose();
-const path = require('path');
+require('dotenv').config();
+const { createClient } = require('@supabase/supabase-js');
 
-const dbPath = path.resolve(__dirname, 'labourlink.db');
-const db = new sqlite3.Database(dbPath, (err) => {
-  if (err) {
-    console.error('Error opening database:', err.message);
-  } else {
-    console.log('Connected to the SQLite database:', dbPath);
+const supabaseUrl = (process.env.SUPABASE_URL || '').trim();
+const supabaseAnonKey = (process.env.SUPABASE_ANON_KEY || '').trim();
+
+let supabase = null;
+let isConfigured = false;
+
+if (supabaseUrl && supabaseAnonKey && supabaseUrl.startsWith('http')) {
+  try {
+    supabase = createClient(supabaseUrl, supabaseAnonKey);
+    isConfigured = true;
+    console.log(`Connected to Supabase project at: ${supabaseUrl}`);
+  } catch (err) {
+    console.error('Error initializing Supabase client:', err.message);
   }
-});
+} else {
+  console.warn(
+    '\n============================================================\n' +
+    ' [NOTICE] Supabase credentials not found in .env!\n' +
+    ' 1. Create a project at https://supabase.com\n' +
+    ' 2. Run the SQL in supabase-schema.sql in the SQL Editor\n' +
+    ' 3. Add to your .env:\n' +
+    '    SUPABASE_URL=https://<your-project-id>.supabase.co\n' +
+    '    SUPABASE_ANON_KEY=<your-anon-public-key>\n' +
+    '============================================================\n'
+  );
 
-// Enable foreign keys
-db.run('PRAGMA foreign_keys = ON');
+  // Safe fallback mock so server can start and display clear error in responses
+  const mockQuery = () => {
+    const error = new Error('Supabase not configured. Please add SUPABASE_URL and SUPABASE_ANON_KEY to .env');
+    const chainable = {
+      select: () => chainable,
+      eq: () => chainable,
+      neq: () => chainable,
+      order: () => chainable,
+      limit: () => chainable,
+      single: () => Promise.resolve({ data: null, error }),
+      maybeSingle: () => Promise.resolve({ data: null, error }),
+      insert: () => chainable,
+      upsert: () => chainable,
+      update: () => chainable,
+      delete: () => chainable,
+      then: (resolve) => Promise.resolve({ data: [], error, count: 0 }).then(resolve)
+    };
+    return chainable;
+  };
 
-// Initialize database schema according to LabourLink specifications
-function initSchema() {
-  return new Promise((resolve, reject) => {
-    db.serialize(() => {
-      // 1. workers table
-      db.run(`CREATE TABLE IF NOT EXISTS workers (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        name TEXT NOT NULL,
-        phone_number TEXT UNIQUE NOT NULL,
-        skill_type TEXT NOT NULL,
-        location TEXT NOT NULL,
-        available BOOLEAN DEFAULT 1,
-        registered_at DATETIME DEFAULT CURRENT_TIMESTAMP
-      )`, (err) => {
-        if (err) return reject(err);
-      });
-
-      // 2. jobs table
-      db.run(`CREATE TABLE IF NOT EXISTS jobs (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        employer_name TEXT NOT NULL,
-        employer_phone TEXT NOT NULL,
-        skill_needed TEXT NOT NULL,
-        location TEXT NOT NULL,
-        wage_offered TEXT NOT NULL,
-        date_needed TEXT NOT NULL,
-        status TEXT DEFAULT 'open',
-        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-      )`, (err) => {
-        if (err) return reject(err);
-      });
-
-      // 3. job_interests table
-      db.run(`CREATE TABLE IF NOT EXISTS job_interests (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        job_id INTEGER NOT NULL,
-        worker_id INTEGER NOT NULL,
-        status TEXT DEFAULT 'interested',
-        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-        FOREIGN KEY (job_id) REFERENCES jobs(id) ON DELETE CASCADE,
-        FOREIGN KEY (worker_id) REFERENCES workers(id) ON DELETE CASCADE,
-        UNIQUE (job_id, worker_id)
-      )`, (err) => {
-        if (err) return reject(err);
-        console.log('Database tables initialized: workers, jobs, job_interests.');
-        resolve();
-      });
-    });
-  });
+  supabase = {
+    from: () => mockQuery()
+  };
 }
 
-// Immediately ensure schema is created
-initSchema().catch((err) => {
-  console.error('Failed to initialize schema:', err);
-});
-
-// Promisified query helper functions
-db.runAsync = function (sql, params = []) {
-  return new Promise((resolve, reject) => {
-    db.run(sql, params, function (err) {
-      if (err) reject(err);
-      else resolve({ lastID: this.lastID, changes: this.changes });
-    });
-  });
-};
-
-db.getAsync = function (sql, params = []) {
-  return new Promise((resolve, reject) => {
-    db.get(sql, params, (err, row) => {
-      if (err) reject(err);
-      else resolve(row);
-    });
-  });
-};
-
-db.allAsync = function (sql, params = []) {
-  return new Promise((resolve, reject) => {
-    db.all(sql, params, (err, rows) => {
-      if (err) reject(err);
-      else resolve(rows || []);
-    });
-  });
-};
-
-db.initSchema = initSchema;
-
-module.exports = db;
+module.exports = supabase;
+module.exports.supabase = supabase;
+module.exports.isConfigured = isConfigured;

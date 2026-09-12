@@ -108,8 +108,8 @@ async function runTests() {
   console.log(`[6] GET /employer/post-success/${jobId} -> Status: ${matchRes.statusCode}, Found Vikram in matches: ${matchRes.body.includes('Vikram Singh')}`);
 
   // Query Vikram's worker id
-  const db = require('./database');
-  const vikram = await db.getAsync('SELECT id FROM workers WHERE phone_number = ?', ['9811122233']);
+  const supabase = require('./database');
+  const { data: vikram } = await supabase.from('workers').select('id').eq('phone_number', '9811122233').single();
 
   // Test 7: Worker expresses interest in the new job
   const interestData = new URLSearchParams({

@@ -72,9 +72,20 @@
                   🔒 Currently on Active Job (<%= worker.active_zone || 'Other Area' %>)
                 </button>
               <% } else { %>
-                <a href="tel:<%= worker.phone_number %>" class="btn btn-success btn-block btn-sm" style="margin-top: 0.75rem;">
-                  📞 Call Worker Directly
-                </a>
+                <div style="display: flex; gap: 0.5rem; margin-top: 0.75rem;">
+                  <form action="/employer/reject-worker" method="POST" style="flex: 1;" onsubmit="return confirm('Pass on <%= worker.name %> for this job? They will be removed from this list.')">
+                    <input type="hidden" name="job_id" value="<%= job.id %>">
+                    <input type="hidden" name="worker_id" value="<%= worker.id %>">
+                    <input type="hidden" name="employer_phone" value="<%= job.employer_phone %>">
+                    <input type="hidden" name="redirect_to" value="post-success">
+                    <button type="submit" class="btn btn-outline btn-block btn-sm" style="color: #ef4444; border-color: #fca5a5;">
+                      ✕ Pass
+                    </button>
+                  </form>
+                  <a href="tel:<%= worker.phone_number %>" class="btn btn-success btn-block btn-sm" style="flex: 2;">
+                    📞 Call Worker
+                  </a>
+                </div>
               <% } %>
             </div>
           </div>

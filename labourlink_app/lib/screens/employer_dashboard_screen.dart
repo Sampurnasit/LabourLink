@@ -110,6 +110,52 @@ class _EmployerDashboardScreenState extends State<EmployerDashboardScreen> {
     }
   }
 
+  Future<void> _rejectWorker(Job job, InterestedWorker worker) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Pass on Applicant'),
+        content: Text(
+          'Pass on ${worker.name} for this specific job (${job.skillNeeded})?\n\nThey will no longer appear in this job\'s applicant list, but remain available for your other jobs.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            style: FilledButton.styleFrom(
+              backgroundColor: const Color(0xFFEF4444),
+            ),
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Pass / Remove'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed == true) {
+      final success = await ApiService.rejectWorker(
+        job.id,
+        worker.workerId,
+        employerPhone: _phoneController.text.trim(),
+      );
+      if (success && mounted) {
+        setState(() {
+          job.interestedWorkers?.removeWhere((w) => w.workerId == worker.workerId);
+        });
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              '${worker.name} removed from this job list.',
+            ),
+            backgroundColor: const Color(0xFF475569),
+          ),
+        );
+      }
+    }
+  }
+
   Future<void> _completeJob(Job job) async {
     final confirmed = await showDialog<bool>(
       context: context,
@@ -715,6 +761,19 @@ class _EmployerDashboardScreenState extends State<EmployerDashboardScreen> {
                             ),
                           ),
                           if (isOpen && !isConfirmed) ...[
+                            const SizedBox(width: 8),
+                            OutlinedButton.icon(
+                              style: OutlinedButton.styleFrom(
+                                foregroundColor: const Color(0xFFEF4444),
+                                side: const BorderSide(color: Color(0xFFFCA5A5)),
+                                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+                                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                                visualDensity: VisualDensity.compact,
+                              ),
+                              icon: const Icon(Icons.close, size: 14),
+                              label: const Text('Pass', style: TextStyle(fontWeight: FontWeight.w700, fontSize: 12)),
+                              onPressed: () => _rejectWorker(job, worker),
+                            ),
                             const SizedBox(width: 8),
                             Expanded(
                               child: ElevatedButton.icon(

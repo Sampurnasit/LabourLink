@@ -214,12 +214,34 @@ function initSchema() {
         job_id INTEGER NOT NULL,
         worker_id INTEGER NOT NULL,
         status TEXT DEFAULT 'interested',
+        reason TEXT,
+        rejected_at DATETIME,
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
         FOREIGN KEY (job_id) REFERENCES jobs(id) ON DELETE CASCADE,
         FOREIGN KEY (worker_id) REFERENCES workers(id) ON DELETE CASCADE,
         UNIQUE (job_id, worker_id)
       )`, (err) => {
         if (err) return reject(err);
+        // Safely add columns if upgrading existing table
+        db.run(`ALTER TABLE job_interests ADD COLUMN reason TEXT`, () => {});
+        db.run(`ALTER TABLE job_interests ADD COLUMN rejected_at DATETIME`, () => {});
+      });
+
+      // 3b. job_rejections table (Job-scoped rejection tracking)
+      db.run(`CREATE TABLE IF NOT EXISTS job_rejections (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        hirer_phone TEXT,
+        job_id INTEGER NOT NULL,
+        worker_id INTEGER NOT NULL,
+        reason TEXT,
+        rejected_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (job_id) REFERENCES jobs(id) ON DELETE CASCADE,
+        FOREIGN KEY (worker_id) REFERENCES workers(id) ON DELETE CASCADE,
+        UNIQUE (job_id, worker_id)
+      )`, (err) => {
+        if (err) return reject(err);
+        db.run(`CREATE INDEX IF NOT EXISTS idx_job_rejections_job_worker ON job_rejections (job_id, worker_id)`, () => {});
+        db.run(`CREATE INDEX IF NOT EXISTS idx_job_rejections_hirer_job ON job_rejections (hirer_phone, job_id)`, () => {});
       });
 
       // 4. worker_cv table
@@ -257,7 +279,7 @@ function initSchema() {
         UNIQUE (job_id, worker_id)
       )`, (err) => {
         if (err) return reject(err);
-        console.log('Database tables initialized: workers, jobs, job_interests, worker_cv, worker_ratings.');
+        console.log('Database tables initialized: workers, jobs, job_interests, job_rejections, worker_cv, worker_ratings.');
         resolve();
       });
     });

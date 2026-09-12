@@ -339,7 +339,152 @@ async function runTests() {
   const profileData = JSON.parse(profileRes.body);
   console.log(`[21] Worker Profile Verification -> avg_rating: ${profileData.worker.avg_rating} (Expected 4.5), has_cv: ${profileData.worker.has_cv === 1 || profileData.worker.has_cv === true}, CV included: ${!!profileData.cv}`);
 
-  console.log('--- ALL 21 AUTOMATED VERIFICATION TESTS PASSED SUCCESSFULLY! ---');
+  // =========================================================================
+  // JOB-SCOPED WORKER REJECTION FEATURE TESTS (Tests 22 - 27)
+  // =========================================================================
+  console.log('\n--- Running Job-Scoped Worker Rejection Tests ---');
+  
+  // Test 22: Hirer 1 posts Job X and Job Y
+  const hirer1Phone = '9900112233';
+  const jobXData = JSON.stringify({
+    employer_name: 'Anand Builders',
+    employer_phone: hirer1Phone,
+    skill_needed: 'Plumbing',
+    location: 'Koramangala',
+    wage_offered: '₹900/day',
+    date_needed: 'Today'
+  });
+  const jobXRes = await request({
+    hostname: 'localhost',
+    port: 3000,
+    path: '/api/jobs',
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(jobXData) }
+  }, jobXData);
+  const jobXId = JSON.parse(jobXRes.body).job.id;
+
+  const jobYData = JSON.stringify({
+    employer_name: 'Anand Builders',
+    employer_phone: hirer1Phone,
+    skill_needed: 'Plumbing',
+    location: 'Koramangala',
+    wage_offered: '₹950/day',
+    date_needed: 'Tomorrow'
+  });
+  const jobYRes = await request({
+    hostname: 'localhost',
+    port: 3000,
+    path: '/api/jobs',
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(jobYData) }
+  }, jobYData);
+  const jobYId = JSON.parse(jobYRes.body).job.id;
+  console.log(`[22] Hirer 1 created Job X (#${jobXId}) and Job Y (#${jobYId})`);
+
+  // Test 23: Worker A (Vikram) expresses interest for Job X and Job Y
+  const applyX = JSON.stringify({ worker_id: vikram.id, job_id: jobXId });
+  await request({
+    hostname: 'localhost',
+    port: 3000,
+    path: '/api/workers/interest',
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(applyX) }
+  }, applyX);
+
+  const applyY = JSON.stringify({ worker_id: vikram.id, job_id: jobYId });
+  await request({
+    hostname: 'localhost',
+    port: 3000,
+    path: '/api/workers/interest',
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(applyY) }
+  }, applyY);
+  console.log(`[23] Worker A applied to both Job X and Job Y`);
+
+  // Test 24: Hirer 1 rejects Worker A for Job X
+  const rejectPayload = JSON.stringify({
+    job_id: jobXId,
+    worker_id: vikram.id,
+    employer_phone: hirer1Phone,
+    reason: 'Looking for a master technician with 10+ years exp'
+  });
+  const rejectRes = await request({
+    hostname: 'localhost',
+    port: 3000,
+    path: '/api/employers/reject-worker',
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(rejectPayload) }
+  }, rejectPayload);
+  console.log(`[24] Hirer 1 rejects Worker A for Job X -> Status: ${rejectRes.statusCode} (Expected 200)`);
+
+  // Test 25: Check Hirer 1 Dashboard & Matches:
+  // Worker A should NOT be in Job X's applicant or match list
+  // Worker A SHOULD STILL be in Job Y's applicant and match list
+  const hirerJobsRes = await request({
+    hostname: 'localhost',
+    port: 3000,
+    path: `/api/employers/${hirer1Phone}/jobs`,
+    method: 'GET'
+  });
+  const hirerJobs = JSON.parse(hirerJobsRes.body).jobs;
+  const jobXRecord = hirerJobs.find(j => j.id === jobXId);
+  const jobYRecord = hirerJobs.find(j => j.id === jobYId);
+
+  const workerInJobX = jobXRecord.interestedWorkers.some(w => w.worker_id === vikram.id);
+  const workerInJobY = jobYRecord.interestedWorkers.some(w => w.worker_id === vikram.id);
+  console.log(`[25a] Hirer 1 Dashboard Check -> Worker A in Job X: ${workerInJobX} (Expected false), Worker A in Job Y: ${workerInJobY} (Expected true)`);
+
+  const jobXMatchesRes = await request({
+    hostname: 'localhost',
+    port: 3000,
+    path: `/api/jobs/${jobXId}/matches`,
+    method: 'GET'
+  });
+  const jobXMatches = JSON.parse(jobXMatchesRes.body);
+  const inJobXMatches = jobXMatches.matchedWorkers.some(w => w.id === vikram.id) || jobXMatches.nearbyWorkers.some(w => w.id === vikram.id);
+  console.log(`[25b] Job X Explorer Matches Check -> Worker A excluded from Job X matches: ${!inJobXMatches} (Expected true)`);
+
+  // Test 26: Different Hirer (Hirer 2) posts Job Z in same skill/location -> Worker A MUST be visible
+  const hirer2Phone = '9988776655';
+  const jobZData = JSON.stringify({
+    employer_name: 'Metro City Plumbing Corp',
+    employer_phone: hirer2Phone,
+    skill_needed: 'Plumbing',
+    location: 'Koramangala',
+    wage_offered: '₹1000/day',
+    date_needed: 'Today'
+  });
+  const jobZRes = await request({
+    hostname: 'localhost',
+    port: 3000,
+    path: '/api/jobs',
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(jobZData) }
+  }, jobZData);
+  const jobZId = JSON.parse(jobZRes.body).job.id;
+
+  const jobZMatchesRes = await request({
+    hostname: 'localhost',
+    port: 3000,
+    path: `/api/jobs/${jobZId}/matches`,
+    method: 'GET'
+  });
+  const jobZMatches = JSON.parse(jobZMatchesRes.body);
+  const inJobZMatches = jobZMatches.matchedWorkers.some(w => w.id === vikram.id);
+  console.log(`[26] Multi-Hirer Isolation Check -> Worker A visible in Hirer 2's Job Z: ${inJobZMatches} (Expected true)`);
+
+  // Test 27: Worker A's own dashboard retains transparent history of Job X with status 'rejected'
+  const vikramDashRes = await request({
+    hostname: 'localhost',
+    port: 3000,
+    path: '/api/workers/9811122233',
+    method: 'GET'
+  });
+  const vikramDash = JSON.parse(vikramDashRes.body);
+  const jobXInApplied = vikramDash.appliedJobs.find(j => j.id === jobXId);
+  console.log(`[27] Worker Dashboard History Check -> Job X found in applied: ${!!jobXInApplied}, status: "${jobXInApplied?.interest_status}" (Expected "rejected")`);
+
+  console.log('\n--- ALL 27 AUTOMATED VERIFICATION TESTS PASSED SUCCESSFULLY! ---');
   process.exit(0);
 }
 

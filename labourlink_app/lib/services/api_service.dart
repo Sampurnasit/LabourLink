@@ -458,6 +458,39 @@ class ApiService {
     }
   }
 
+  // 10b. Reject / Pass a Worker for a Specific Job
+  static Future<bool> rejectWorker(int jobId, int workerId, {String? reason, String? employerPhone}) async {
+    try {
+      final Map<String, dynamic> payload = {
+        'job_id': jobId,
+        'worker_id': workerId,
+        'reason': reason ?? '',
+      };
+      if (employerPhone != null && employerPhone.isNotEmpty) {
+        payload['employer_phone'] = employerPhone;
+      }
+      final res = await _safePost('/api/employers/reject-worker', payload);
+      return res != null && (res.statusCode == 200 || res.statusCode == 201);
+    } catch (e) {
+      debugPrint('Error rejecting worker: $e');
+      return false;
+    }
+  }
+
+  // 10c. Undo Rejection (Optional)
+  static Future<bool> unrejectWorker(int jobId, int workerId) async {
+    try {
+      final res = await _safePost('/api/employers/unreject-worker', {
+        'job_id': jobId,
+        'worker_id': workerId,
+      });
+      return res != null && res.statusCode == 200;
+    } catch (e) {
+      debugPrint('Error unrejecting worker: $e');
+      return false;
+    }
+  }
+
   // 11. Complete a Job (Frees up labourer and returns assigned worker info)
   static Future<Map<String, dynamic>?> completeJob(int jobId) async {
     try {

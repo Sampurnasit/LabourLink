@@ -42,6 +42,51 @@ class _EmployerMatchesScreenState extends State<EmployerMatchesScreen> {
     }
   }
 
+  Future<void> _rejectWorker(Worker worker) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Pass on Candidate'),
+        content: Text(
+          'Pass on ${worker.name} for this specific job?\n\nThey will no longer appear in this job\'s match pool, but remain available for your other jobs.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            style: FilledButton.styleFrom(
+              backgroundColor: const Color(0xFFEF4444),
+            ),
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Pass / Remove'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed == true) {
+      final success = await ApiService.rejectWorker(
+        widget.jobId,
+        worker.id,
+        employerPhone: _job?.employerPhone,
+      );
+      if (success && mounted) {
+        setState(() {
+          _matchedWorkers.removeWhere((w) => w.id == worker.id);
+          _nearbyWorkers.removeWhere((w) => w.id == worker.id);
+        });
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('${worker.name} removed from this job\'s matches.'),
+            backgroundColor: const Color(0xFF475569),
+          ),
+        );
+      }
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -348,6 +393,19 @@ class _EmployerMatchesScreenState extends State<EmployerMatchesScreen> {
                             ),
                           );
                         },
+                      ),
+                      const SizedBox(width: 8),
+                      OutlinedButton.icon(
+                        style: OutlinedButton.styleFrom(
+                          foregroundColor: const Color(0xFFEF4444),
+                          side: const BorderSide(color: Color(0xFFFCA5A5)),
+                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                          visualDensity: VisualDensity.compact,
+                        ),
+                        icon: const Icon(Icons.close, size: 14),
+                        label: const Text('Pass', style: TextStyle(fontWeight: FontWeight.w700, fontSize: 12)),
+                        onPressed: () => _rejectWorker(worker),
                       ),
                       const SizedBox(width: 8),
                       if (isBusy)

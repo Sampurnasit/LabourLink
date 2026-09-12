@@ -517,9 +517,10 @@ class ApiService {
   }
 
   // 13. Get Worker CV (Structured Form Data)
-  static Future<WorkerCv?> getWorkerCv(int workerId) async {
+  static Future<WorkerCv?> getWorkerCv(int workerId, {String? phone}) async {
     try {
-      final res = await _safeGet('/api/workers/$workerId/cv');
+      final path = workerId > 0 ? '/api/workers/$workerId/cv' : (phone != null ? '/api/workers/$phone/cv' : '/api/workers/$workerId/cv');
+      final res = await _safeGet(path);
       if (res != null && res.statusCode == 200) {
         final data = jsonDecode(res.body);
         if (data['has_cv'] == true && data['cv'] != null) {
@@ -536,10 +537,27 @@ class ApiService {
   // 14. Save Worker CV
   static Future<bool> saveWorkerCv(int workerId, Map<String, dynamic> cvData) async {
     try {
-      final res = await _safePost('/api/workers/$workerId/cv', cvData);
-      return res != null && res.statusCode == 200;
+      lastErrorMessage = null;
+      final path = workerId > 0 ? '/api/workers/$workerId/cv' : '/api/workers/cv';
+      final res = await _safePost(path, cvData);
+      if (res != null) {
+        if (res.statusCode >= 200 && res.statusCode < 300) {
+          return true;
+        } else {
+          try {
+            final data = jsonDecode(res.body);
+            lastErrorMessage = data['message'] ?? data['error'] ?? 'Error saving CV (HTTP ${res.statusCode})';
+          } catch (_) {
+            lastErrorMessage = 'Error saving CV (HTTP ${res.statusCode})';
+          }
+        }
+      } else {
+        lastErrorMessage = 'Cannot reach backend at $baseUrl. Please verify server connection.';
+      }
+      return false;
     } catch (e) {
       debugPrint('Error saving worker CV: $e');
+      lastErrorMessage = 'Error saving worker CV: $e';
       return false;
     }
   }

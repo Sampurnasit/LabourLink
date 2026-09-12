@@ -961,21 +961,56 @@ app.post('/api/jobs/:id/cancel', async (req, res) => {
 });
 
 // 13. Get Worker CV (Structured form data)
-app.get('/api/workers/:id/cv', async (req, res) => {
+// 13. Get Worker CV (Structured Form Data)
+app.get(['/api/workers/:id/cv', '/api/workers/cv/:id'], async (req, res) => {
   try {
-    const workerId = req.params.id;
-    const worker = await db.getAsync(
-      `SELECT w.*,
-              COALESCE((SELECT ROUND(AVG(rating), 1) FROM worker_ratings WHERE worker_id = w.id), 0.0) as avg_rating,
-              COALESCE((SELECT COUNT(*) FROM worker_ratings WHERE worker_id = w.id), 0) as rating_count
-       FROM workers w WHERE w.id = ?`,
-      [workerId]
-    );
+    const rawId = req.params.id;
+    let worker = null;
+    if (/^\d{10}$/.test(rawId)) {
+      worker = await db.getAsync(
+        `SELECT w.*,
+                COALESCE((SELECT ROUND(AVG(rating), 1) FROM worker_ratings WHERE worker_id = w.id), 0.0) as avg_rating,
+                COALESCE((SELECT COUNT(*) FROM worker_ratings WHERE worker_id = w.id), 0) as rating_count
+         FROM workers w WHERE w.phone_number = ?`,
+        [cleanPhone(rawId)]
+      );
+    } else {
+      const workerId = parseInt(rawId, 10);
+      if (!isNaN(workerId) && workerId > 0) {
+        worker = await db.getAsync(
+          `SELECT w.*,
+                  COALESCE((SELECT ROUND(AVG(rating), 1) FROM worker_ratings WHERE worker_id = w.id), 0.0) as avg_rating,
+                  COALESCE((SELECT COUNT(*) FROM worker_ratings WHERE worker_id = w.id), 0) as rating_count
+           FROM workers w WHERE w.id = ?`,
+          [workerId]
+        );
+      }
+    }
+
+    if (!worker && supabase) {
+      try {
+        let query = supabase.from('workers').select('*');
+        if (/^\d{10}$/.test(rawId)) {
+          query = query.eq('phone_number', cleanPhone(rawId));
+        } else {
+          query = query.eq('id', parseInt(rawId, 10));
+        }
+        const { data: sbW } = await query.maybeSingle();
+        if (sbW) {
+          await db.runAsync(
+            'INSERT OR IGNORE INTO workers (id, name, phone_number, skill_type, location, available) VALUES (?, ?, ?, ?, ?, ?)',
+            [sbW.id, sbW.name, sbW.phone_number, sbW.skill_type, sbW.location, sbW.available ? 1 : 0]
+          );
+          worker = sbW;
+        }
+      } catch (_) {}
+    }
+
     if (!worker) {
       return res.status(404).json({ error: 'Worker not found' });
     }
 
-    const cv = await db.getAsync('SELECT * FROM worker_cv WHERE worker_id = ?', [workerId]);
+    const cv = await db.getAsync('SELECT * FROM worker_cv WHERE worker_id = ?', [worker.id]);
     if (!cv) {
       return res.json({
         status: 'ok',
@@ -1006,12 +1041,56 @@ app.get('/api/workers/:id/cv', async (req, res) => {
 });
 
 // 14. Save / Update Worker CV (Structured Form Submission)
-app.post('/api/workers/:id/cv', async (req, res) => {
+app.post(['/api/workers/:id/cv', '/api/workers/cv'], async (req, res) => {
   try {
-    const workerId = parseInt(req.params.id, 10);
-    const worker = await db.getAsync('SELECT id, name, phone_number FROM workers WHERE id = ?', [workerId]);
+    const rawId = req.params.id || req.body.worker_id;
+    const phone = req.body.phone_number ? cleanPhone(req.body.phone_number) : null;
+
+    let worker = null;
+    if (rawId && rawId !== '0' && rawId !== 0) {
+      if (/^\d{10}$/.test(String(rawId))) {
+        worker = await db.getAsync('SELECT id, name, phone_number FROM workers WHERE phone_number = ?', [cleanPhone(String(rawId))]);
+      } else {
+        const workerId = parseInt(rawId, 10);
+        if (!isNaN(workerId) && workerId > 0) {
+          worker = await db.getAsync('SELECT id, name, phone_number FROM workers WHERE id = ?', [workerId]);
+        }
+      }
+    }
+
+    if (!worker && phone) {
+      worker = await db.getAsync('SELECT id, name, phone_number FROM workers WHERE phone_number = ?', [phone]);
+    }
+
+    if (!worker && supabase && (phone || rawId)) {
+      try {
+        let query = supabase.from('workers').select('*');
+        if (phone) {
+          query = query.eq('phone_number', phone);
+        } else if (rawId) {
+          query = query.eq('id', parseInt(rawId, 10));
+        }
+        const { data: sbW } = await query.maybeSingle();
+        if (sbW) {
+          await db.runAsync(
+            'INSERT OR IGNORE INTO workers (id, name, phone_number, skill_type, location, available) VALUES (?, ?, ?, ?, ?, ?)',
+            [sbW.id, sbW.name, sbW.phone_number, sbW.skill_type, sbW.location, sbW.available ? 1 : 0]
+          );
+          worker = sbW;
+        }
+      } catch (_) {}
+    }
+
     if (!worker) {
-      return res.status(404).json({ error: 'Worker not found' });
+      if (phone && req.body.full_name) {
+        const ins = await db.runAsync(
+          'INSERT INTO workers (name, phone_number, skill_type, location, available) VALUES (?, ?, ?, ?, 1)',
+          [req.body.full_name.trim(), phone, req.body.skills ? (Array.isArray(req.body.skills) ? req.body.skills[0] : req.body.skills) : 'General', req.body.work_location || 'Citywide']
+        );
+        worker = await db.getAsync('SELECT id, name, phone_number FROM workers WHERE id = ?', [ins.lastID]);
+      } else {
+        return res.status(404).json({ error: 'Worker not found. Please register as a worker first.' });
+      }
     }
 
     const {
@@ -1056,7 +1135,7 @@ app.post('/api/workers/:id/cv', async (req, res) => {
          about_me = excluded.about_me,
          updated_at = CURRENT_TIMESTAMP`,
       [
-        workerId,
+        worker.id,
         full_name.trim(),
         dob_or_age || '',
         cleanPhone(phone_number) || worker.phone_number,
@@ -1071,11 +1150,40 @@ app.post('/api/workers/:id/cv', async (req, res) => {
       ]
     );
 
+    if (supabase) {
+      try {
+        await supabase
+          .from('worker_cv')
+          .upsert([
+            {
+              worker_id: worker.id,
+              full_name: full_name.trim(),
+              dob_or_age: dob_or_age || '',
+              phone_number: cleanPhone(phone_number) || worker.phone_number,
+              skills: skillsJson,
+              years_of_experience: yoe,
+              previous_work: prevWorkJson,
+              work_location: work_location || '',
+              daily_wage_expectation: daily_wage_expectation || '',
+              availability_type: availability_type || 'Full-time',
+              languages: languages || '',
+              about_me: about_me || '',
+              updated_at: new Date().toISOString()
+            }
+          ], { onConflict: 'worker_id' });
+      } catch (sbErr) {
+        console.warn('Supabase worker_cv sync note:', sbErr.message);
+      }
+    }
+
     res.json({
       status: 'ok',
-      message: 'Worker CV saved successfully'
+      success: true,
+      message: 'Worker CV saved successfully',
+      worker_id: worker.id
     });
   } catch (err) {
+    console.error('Error saving CV:', err);
     res.status(500).json({ error: err.message });
   }
 });

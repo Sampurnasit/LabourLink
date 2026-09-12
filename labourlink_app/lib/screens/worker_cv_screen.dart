@@ -215,13 +215,72 @@ class _WorkerCvScreenState extends State<WorkerCvScreen> {
         Navigator.pop(context, true);
       }
     } else {
+      final errorMsg = ApiService.lastErrorMessage ?? 'Failed to save CV. Please check backend connection.';
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Failed to save CV. Please check backend connection.'),
+        SnackBar(
+          content: Text(errorMsg),
           backgroundColor: Colors.red,
+          action: SnackBarAction(
+            label: 'Configure',
+            textColor: Colors.white,
+            onPressed: _showSettings,
+          ),
         ),
       );
     }
+  }
+
+  void _showSettings() {
+    final controller = TextEditingController(text: ApiService.baseUrl);
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Backend Server URL'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text(
+              'Change the backend connection URL if your server is on a different IP or port:',
+              style: TextStyle(fontSize: 13, color: Colors.black87),
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: controller,
+              decoration: const InputDecoration(
+                labelText: 'Server Base URL',
+                hintText: 'e.g. http://127.0.0.1:3000 or http://192.168.0.x:3000',
+                border: OutlineInputBorder(),
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () async {
+              final newUrl = controller.text.trim();
+              if (newUrl.isNotEmpty) {
+                Navigator.pop(ctx);
+                await ApiService.setBaseUrl(newUrl);
+                if (mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(
+                      content: Text('Backend URL set to: ${ApiService.baseUrl}'),
+                      backgroundColor: const Color(0xFF10B981),
+                    ),
+                  );
+                }
+              }
+            },
+            child: const Text('Save & Reconnect'),
+          ),
+        ],
+      ),
+    );
   }
 
   @override
@@ -230,6 +289,11 @@ class _WorkerCvScreenState extends State<WorkerCvScreen> {
       appBar: AppBar(
         title: Text(widget.isFirstTime ? 'Complete Your Profile / CV' : 'Edit My CV'),
         actions: [
+          IconButton(
+            icon: const Icon(Icons.settings_outlined),
+            tooltip: 'Server Settings',
+            onPressed: _showSettings,
+          ),
           if (widget.isFirstTime)
             TextButton(
               onPressed: () {

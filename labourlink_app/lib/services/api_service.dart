@@ -9,12 +9,13 @@ import '../models/worker_cv.dart';
 
 class ApiService {
   static const Duration requestTimeout = Duration(seconds: 4);
+  static String? lastErrorMessage;
 
   // Candidate URLs for auto-discovery across all platforms & network setups
   static List<String> get candidateUrls => [
     'http://127.0.0.1:3000',
     'http://localhost:3000',
-    'http://192.168.0.161:3000',
+    'http://192.168.0.196:3000',
     'http://10.0.2.2:3000',
   ];
 
@@ -267,6 +268,7 @@ class ApiService {
     required String dateNeeded,
   }) async {
     try {
+      lastErrorMessage = null;
       final res = await _safePost('/api/jobs', {
         'employer_name': employerName,
         'employer_phone': employerPhone,
@@ -276,13 +278,25 @@ class ApiService {
         'date_needed': dateNeeded,
       });
 
-      if (res != null && res.statusCode == 201) {
-        final data = jsonDecode(res.body);
-        return Job.fromJson(data['job']);
+      if (res != null) {
+        if (res.statusCode >= 200 && res.statusCode < 300) {
+          final data = jsonDecode(res.body);
+          return Job.fromJson(data['job']);
+        } else {
+          try {
+            final data = jsonDecode(res.body);
+            lastErrorMessage = data['message'] ?? data['error'] ?? 'Failed to post job (${res.statusCode})';
+          } catch (_) {
+            lastErrorMessage = 'Failed to post job (${res.statusCode})';
+          }
+        }
+      } else {
+        lastErrorMessage = 'Cannot connect to server at $baseUrl. Please ensure the backend is running.';
       }
       return null;
     } catch (e) {
       debugPrint('Error posting job: $e');
+      lastErrorMessage = 'Error posting job: $e';
       return null;
     }
   }
@@ -291,7 +305,7 @@ class ApiService {
   static Future<Map<String, dynamic>?> getJobMatches(int jobId) async {
     try {
       final res = await _safeGet('/api/jobs/$jobId/matches');
-      if (res != null && res.statusCode == 200) {
+      if (res != null && (res.statusCode >= 200 && res.statusCode < 300)) {
         final data = jsonDecode(res.body);
         final job = Job.fromJson(data['job']);
         final matchedWorkers = (data['matchedWorkers'] as List? ?? [])
@@ -323,6 +337,7 @@ class ApiService {
     required bool available,
   }) async {
     try {
+      lastErrorMessage = null;
       final res = await _safePost('/api/workers/register', {
         'name': name,
         'phone_number': phoneNumber,
@@ -331,13 +346,25 @@ class ApiService {
         'available': available,
       });
 
-      if (res != null && res.statusCode == 200) {
-        final data = jsonDecode(res.body);
-        return Worker.fromJson(data['worker']);
+      if (res != null) {
+        if (res.statusCode >= 200 && res.statusCode < 300) {
+          final data = jsonDecode(res.body);
+          return Worker.fromJson(data['worker']);
+        } else {
+          try {
+            final data = jsonDecode(res.body);
+            lastErrorMessage = data['message'] ?? data['error'] ?? 'Registration failed with code ${res.statusCode}';
+          } catch (_) {
+            lastErrorMessage = 'Registration failed with code ${res.statusCode}';
+          }
+        }
+      } else {
+        lastErrorMessage = 'Cannot connect to server at $baseUrl. Please ensure the backend is running.';
       }
       return null;
     } catch (e) {
       debugPrint('Error registering worker: $e');
+      lastErrorMessage = 'Error registering worker: $e';
       return null;
     }
   }

@@ -508,7 +508,7 @@ app.post('/api/workers/register', async (req, res) => {
       worker = await db.getAsync('SELECT * FROM workers WHERE phone_number = ?', [phone]);
     }
 
-    res.status(201).json({
+    res.status(200).json({
       success: true,
       status: 'ok',
       message: 'Worker profile successfully registered.',
@@ -574,7 +574,7 @@ app.post(['/api/employers/register', '/api/hirers/register'], async (req, res) =
       console.warn('Notice: employers table insert skipped:', error.message);
     }
 
-    res.status(201).json({
+    res.status(200).json({
       success: true,
       status: 'ok',
       message: 'Hirer profile registered successfully.',

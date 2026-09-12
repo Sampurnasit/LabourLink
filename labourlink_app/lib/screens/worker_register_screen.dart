@@ -107,9 +107,10 @@ class _WorkerRegisterScreenState extends State<WorkerRegisterScreen> {
         ),
       );
     } else {
+      final errorMsg = ApiService.lastErrorMessage ?? 'Registration failed: Cannot connect to ${ApiService.baseUrl}.';
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('Registration failed: Cannot connect to ${ApiService.baseUrl}.'),
+          content: Text(errorMsg),
           backgroundColor: Colors.red,
           action: SnackBarAction(
             label: 'Configure',

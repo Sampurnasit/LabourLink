@@ -108,9 +108,10 @@ class _EmployerPostJobScreenState extends State<EmployerPostJobScreen> {
         ),
       );
     } else {
+      final errorMsg = ApiService.lastErrorMessage ?? 'Failed to post job: Cannot connect to ${ApiService.baseUrl}.';
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('Failed to post job: Cannot connect to ${ApiService.baseUrl}.'),
+          content: Text(errorMsg),
           backgroundColor: Colors.red,
           action: SnackBarAction(
             label: 'Configure',

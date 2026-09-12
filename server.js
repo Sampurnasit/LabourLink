@@ -2,10 +2,17 @@ require('dotenv').config();
 const express = require('express');
 const path = require('path');
 const cors = require('cors');
+const axios = require('axios');
 const db = require('./database');
 
 const app = express();
 const port = process.env.PORT || 3000;
+
+// Exotel Cloud Communication API Configuration
+const EXOTEL_SID = (process.env.EXOTEL_SID || '').trim();
+const EXOTEL_API_KEY = (process.env.EXOTEL_API_KEY || '').trim();
+const EXOTEL_API_TOKEN = (process.env.EXOTEL_API_TOKEN || '').trim();
+const EXOTEL_PHONE_NUMBER = (process.env.EXOTEL_PHONE_NUMBER || '').trim();
 
 // Enable CORS for Flutter apps (Web, Desktop, Mobile)
 app.use(cors());
@@ -31,6 +38,113 @@ function cleanPhone(phone) {
   const digits = String(phone).replace(/[^0-9]/g, '');
   return digits.length > 10 ? digits.slice(-10) : digits;
 }
+
+/**
+ * Reusable function to send SMS via Exotel Cloud Communication REST API
+ * POST https://api.exotel.com/v1/Accounts/{EXOTEL_SID}/Sms/send.json
+ * Auth: Basic Auth (API_KEY : API_TOKEN)
+ * Body: From, To, Body (application/x-www-form-urlencoded)
+ */
+async function sendSms(toNumber, messageBody) {
+  if (!EXOTEL_SID || !EXOTEL_API_KEY || !EXOTEL_API_TOKEN) {
+    console.warn('[Exotel SMS] Missing Exotel configuration in .env. Skipping SMS to:', toNumber);
+    return { success: false, error: 'Exotel credentials not configured in environment' };
+  }
+
+  const recipient = cleanPhone(toNumber) || String(toNumber).trim();
+  if (!recipient) {
+    console.warn('[Exotel SMS] Empty or invalid recipient phone number:', toNumber);
+    return { success: false, error: 'Empty recipient phone number' };
+  }
+
+  try {
+    const endpoint = `https://api.exotel.com/v1/Accounts/${EXOTEL_SID}/Sms/send.json`;
+    const params = new URLSearchParams();
+    params.append('From', EXOTEL_PHONE_NUMBER);
+    params.append('To', recipient);
+    params.append('Body', messageBody);
+
+    console.log(`[Exotel SMS] Sending message to ${recipient} via Exotel from ${EXOTEL_PHONE_NUMBER}...`);
+    const response = await axios.post(endpoint, params.toString(), {
+      headers: {
+        'Content-Type': 'application/x-www-form-urlencoded'
+      },
+      auth: {
+        username: EXOTEL_API_KEY,
+        password: EXOTEL_API_TOKEN
+      },
+      timeout: 10000
+    });
+
+    console.log(`[Exotel SMS] Successfully sent to ${recipient}. Response:`, JSON.stringify(response.data));
+    return { success: true, data: response.data };
+  } catch (error) {
+    const errorDetails = error.response
+      ? { status: error.response.status, data: error.response.data }
+      : error.message;
+    console.error(`[Exotel SMS Error] Failed to send SMS to ${recipient}:`, errorDetails);
+    return { success: false, error: errorDetails };
+  }
+}
+
+// ==========================================================================
+// EXOTEL SMS WEBHOOK & TEST ROUTES
+// ==========================================================================
+
+// Webhook route to receive incoming SMS notifications from Exotel
+function handleIncomingExotelSms(req, res) {
+  console.log('====================================================');
+  console.log('       [EXOTEL INCOMING SMS WEBHOOK RECEIVED]       ');
+  console.log('====================================================');
+  console.log('Timestamp:', new Date().toISOString());
+  console.log('Method:', req.method);
+  console.log('Headers:', JSON.stringify(req.headers, null, 2));
+  console.log('Query Params:', JSON.stringify(req.query, null, 2));
+  console.log('Request Body:', JSON.stringify(req.body, null, 2));
+
+  // Extract common Exotel incoming SMS fields
+  const sender = req.body.From || req.body.from || req.body.CallFrom || req.query.From || req.query.from || 'Unknown';
+  const text = req.body.Body || req.body.body || req.body.SmsBody || req.query.Body || req.query.body || '';
+  const messageSid = req.body.SmsSid || req.body.smsSid || req.query.SmsSid || req.query.smsSid || '';
+
+  console.log(`[Exotel Webhook Parsed] Sender: "${sender}", Body: "${text}", Sid: "${messageSid}"`);
+  console.log('====================================================');
+
+  res.status(200).json({
+    status: 'received',
+    timestamp: new Date().toISOString(),
+    sender,
+    text,
+    messageSid
+  });
+}
+
+app.post('/exotel/sms-incoming', handleIncomingExotelSms);
+app.get('/exotel/sms-incoming', handleIncomingExotelSms);
+
+// Test route to verify Exotel SMS sending directly
+app.get('/exotel/test-sms', async (req, res) => {
+  try {
+    const verifiedNumber = process.env.EXOTEL_VERIFIED_NUMBER || process.env.TEST_PHONE_NUMBER || '9876543210';
+    const recipient = req.query.to || verifiedNumber;
+    const testMessage = req.query.msg || `LabourLink Test: Exotel SMS integration verified successfully at ${new Date().toLocaleTimeString('en-IN')}.`;
+
+    console.log(`[Exotel Test Route] Triggering test SMS to: ${recipient}`);
+    const result = await sendSms(recipient, testMessage);
+
+    res.json({
+      testRoute: '/exotel/test-sms',
+      status: result.success ? 'success' : 'failed',
+      recipient,
+      message: testMessage,
+      result,
+      tip: 'You can test any number by passing ?to=YOUR_10_DIGIT_NUMBER in the URL (e.g., /exotel/test-sms?to=9876543210)'
+    });
+  } catch (err) {
+    console.error('[Exotel Test Route Error]:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
 
 // ==========================================================================
 // REST API ENDPOINTS FOR FLUTTER APPLICATION
@@ -99,6 +213,27 @@ app.post('/api/jobs', async (req, res) => {
     );
 
     const newJob = await db.getAsync('SELECT * FROM jobs WHERE id = ?', [result.lastID]);
+
+    // Dispatch Exotel SMS notifications to matching workers
+    try {
+      const matchedWorkers = await db.allAsync(
+        'SELECT * FROM workers WHERE skill_type = ? AND location = ? AND available = 1',
+        [skill_needed, location]
+      );
+      console.log(`[Job Alert] Found ${matchedWorkers.length} matching worker(s) for Job #${newJob.id} (${skill_needed} in ${location})`);
+
+      for (const worker of matchedWorkers) {
+        const workerMsg = `LabourLink Alert: New ${skill_needed} job in ${location}! Wage: ${wage_offered.trim()}, Date: ${date_needed || 'Today'}. Employer: ${employer_name.trim()} (${phone}). Contact employer to accept.`;
+        sendSms(worker.phone_number, workerMsg);
+      }
+
+      // Confirmation SMS to Employer
+      const employerMsg = `LabourLink: Your job #${newJob.id} for ${skill_needed} in ${location} has been posted. We alerted ${matchedWorkers.length} matching worker(s).`;
+      sendSms(phone, employerMsg);
+    } catch (smsErr) {
+      console.error('[Job Alert SMS Error]:', smsErr);
+    }
+
     res.status(201).json({ status: 'ok', job: newJob });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -159,6 +294,15 @@ app.post('/api/workers/register', async (req, res) => {
     );
 
     const worker = await db.getAsync('SELECT * FROM workers WHERE phone_number = ?', [phone]);
+
+    // Send Exotel SMS confirmation to worker
+    try {
+      const welcomeMsg = `Welcome ${name.trim()} to LabourLink! Your profile for ${skill_type} in ${location} is active. You will receive SMS alerts when matching 1-day gigs are posted in your area.`;
+      sendSms(phone, welcomeMsg);
+    } catch (smsErr) {
+      console.error('[Worker Reg SMS Error]:', smsErr);
+    }
+
     res.json({ status: 'ok', worker });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -286,6 +430,18 @@ app.post('/api/employers/confirm-worker', async (req, res) => {
     );
     await db.runAsync("UPDATE jobs SET status = 'filled' WHERE id = ?", [job_id]);
 
+    // Notify worker of confirmation via Exotel SMS
+    try {
+      const job = await db.getAsync('SELECT * FROM jobs WHERE id = ?', [job_id]);
+      const worker = await db.getAsync('SELECT * FROM workers WHERE id = ?', [worker_id]);
+      if (job && worker) {
+        const confirmMsg = `LabourLink Update: You have been confirmed for the ${job.skill_needed} gig in ${job.location}! Wage: ${job.wage_offered}. Contact employer ${job.employer_name} at ${job.employer_phone}.`;
+        sendSms(worker.phone_number, confirmMsg);
+      }
+    } catch (smsErr) {
+      console.error('[Confirm Worker SMS Error]:', smsErr);
+    }
+
     res.json({ status: 'ok', message: 'Worker confirmed and job marked filled' });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -349,6 +505,14 @@ app.post('/worker/register', async (req, res) => {
          available = excluded.available`,
       [name.trim(), phone, skill_type, location, isAvailable]
     );
+
+    // Send Exotel SMS confirmation to worker
+    try {
+      const welcomeMsg = `Welcome ${name.trim()} to LabourLink! Your profile for ${skill_type} in ${location} is active. You will receive SMS alerts when matching 1-day gigs are posted in your area.`;
+      sendSms(phone, welcomeMsg);
+    } catch (smsErr) {
+      console.error('[Web Worker Reg SMS Error]:', smsErr);
+    }
 
     res.redirect(`/worker/dashboard?phone=${encodeURIComponent(phone)}&registered=1`);
   } catch (err) {
@@ -493,6 +657,26 @@ app.post('/employer/post-job', async (req, res) => {
       [employer_name.trim(), phone, skill_needed, location, wage_offered.trim(), date_needed || 'Today']
     );
 
+    // Dispatch Exotel SMS notifications to matching workers
+    try {
+      const matchedWorkers = await db.allAsync(
+        'SELECT * FROM workers WHERE skill_type = ? AND location = ? AND available = 1',
+        [skill_needed, location]
+      );
+      console.log(`[Job Alert] Found ${matchedWorkers.length} matching worker(s) for Job #${result.lastID} (${skill_needed} in ${location})`);
+
+      for (const worker of matchedWorkers) {
+        const workerMsg = `LabourLink Alert: New ${skill_needed} work in ${location}! Wage: ${wage_offered.trim()}, Date: ${date_needed || 'Today'}. Employer: ${employer_name.trim()} (${phone}). Call employer to accept.`;
+        sendSms(worker.phone_number, workerMsg);
+      }
+
+      // Confirmation to Employer
+      const employerMsg = `LabourLink: Your job #${result.lastID} for ${skill_needed} in ${location} has been posted. We alerted ${matchedWorkers.length} matching worker(s).`;
+      sendSms(phone, employerMsg);
+    } catch (smsErr) {
+      console.error('[Web Post Job SMS Error]:', smsErr);
+    }
+
     res.redirect(`/employer/post-success/${result.lastID}`);
   } catch (err) {
     console.error('Error creating job:', err);
@@ -588,6 +772,18 @@ app.post('/employer/confirm-worker', async (req, res) => {
       [job_id, worker_id]
     );
     await db.runAsync("UPDATE jobs SET status = 'filled' WHERE id = ?", [job_id]);
+
+    // Notify worker of confirmation via Exotel SMS
+    try {
+      const job = await db.getAsync('SELECT * FROM jobs WHERE id = ?', [job_id]);
+      const worker = await db.getAsync('SELECT * FROM workers WHERE id = ?', [worker_id]);
+      if (job && worker) {
+        const confirmMsg = `LabourLink Update: You have been confirmed for the ${job.skill_needed} gig in ${job.location}! Wage: ${job.wage_offered}. Contact employer ${job.employer_name} at ${job.employer_phone}.`;
+        sendSms(worker.phone_number, confirmMsg);
+      }
+    } catch (smsErr) {
+      console.error('[Web Confirm Worker SMS Error]:', smsErr);
+    }
 
     res.redirect(`/employer/dashboard?phone=${encodeURIComponent(employer_phone)}&confirmed=1`);
   } catch (err) {

@@ -5,6 +5,7 @@ import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 import '../models/worker.dart';
 import '../models/job.dart';
+import '../models/worker_cv.dart';
 
 class ApiService {
   static const Duration requestTimeout = Duration(seconds: 4);
@@ -314,17 +315,20 @@ class ApiService {
     }
   }
 
-  // 11. Complete a Job (Frees up labourer)
-  static Future<bool> completeJob(int jobId) async {
+  // 11. Complete a Job (Frees up labourer and returns assigned worker info)
+  static Future<Map<String, dynamic>?> completeJob(int jobId) async {
     try {
       final res = await http.post(
         Uri.parse('$baseUrl/api/jobs/$jobId/complete'),
         headers: {'Content-Type': 'application/json'},
       ).timeout(requestTimeout);
-      return res.statusCode == 200;
+      if (res.statusCode == 200) {
+        return jsonDecode(res.body) as Map<String, dynamic>;
+      }
+      return null;
     } catch (e) {
       debugPrint('Error completing job: $e');
-      return false;
+      return null;
     }
   }
 
@@ -338,6 +342,99 @@ class ApiService {
       return res.statusCode == 200;
     } catch (e) {
       debugPrint('Error cancelling job: $e');
+      return false;
+    }
+  }
+
+  // 13. Get Worker CV (Structured Form Data)
+  static Future<WorkerCv?> getWorkerCv(int workerId) async {
+    try {
+      final res = await http.get(Uri.parse('$baseUrl/api/workers/$workerId/cv')).timeout(requestTimeout);
+      if (res.statusCode == 200) {
+        final data = jsonDecode(res.body);
+        if (data['has_cv'] == true && data['cv'] != null) {
+          return WorkerCv.fromJson(data['cv']);
+        }
+      }
+      return null;
+    } catch (e) {
+      debugPrint('Error getting worker CV: $e');
+      return null;
+    }
+  }
+
+  // 14. Save Worker CV
+  static Future<bool> saveWorkerCv(int workerId, Map<String, dynamic> cvData) async {
+    try {
+      final res = await http.post(
+        Uri.parse('$baseUrl/api/workers/$workerId/cv'),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode(cvData),
+      ).timeout(requestTimeout);
+      return res.statusCode == 200;
+    } catch (e) {
+      debugPrint('Error saving worker CV: $e');
+      return false;
+    }
+  }
+
+  // 15. Submit Worker Rating (1–5 Stars)
+  static Future<Map<String, dynamic>> rateWorker({
+    required int workerId,
+    required int jobId,
+    required String employerPhone,
+    required double rating,
+    String? comment,
+  }) async {
+    try {
+      final res = await http.post(
+        Uri.parse('$baseUrl/api/workers/$workerId/ratings'),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({
+          'job_id': jobId,
+          'employer_phone': employerPhone,
+          'rating': rating,
+          'comment': comment ?? '',
+        }),
+      ).timeout(requestTimeout);
+      final data = jsonDecode(res.body) as Map<String, dynamic>;
+      return {
+        'success': res.statusCode == 200,
+        'status': res.statusCode,
+        ...data,
+      };
+    } catch (e) {
+      debugPrint('Error rating worker: $e');
+      return {'success': false, 'error': e.toString()};
+    }
+  }
+
+  // 16. Get Worker Ratings & Reviews
+  static Future<Map<String, dynamic>?> getWorkerRatings(int workerId) async {
+    try {
+      final res = await http.get(Uri.parse('$baseUrl/api/workers/$workerId/ratings')).timeout(requestTimeout);
+      if (res.statusCode == 200) {
+        return jsonDecode(res.body) as Map<String, dynamic>;
+      }
+      return null;
+    } catch (e) {
+      debugPrint('Error fetching worker ratings: $e');
+      return null;
+    }
+  }
+
+  // 17. Check if Job is already rated
+  static Future<bool> isJobRated(int jobId, {int? workerId}) async {
+    try {
+      var url = '$baseUrl/api/jobs/$jobId/rating';
+      if (workerId != null) url += '?worker_id=$workerId';
+      final res = await http.get(Uri.parse(url)).timeout(requestTimeout);
+      if (res.statusCode == 200) {
+        final data = jsonDecode(res.body);
+        return data['is_rated'] == true;
+      }
+      return false;
+    } catch (e) {
       return false;
     }
   }

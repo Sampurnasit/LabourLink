@@ -3,6 +3,7 @@ import '../services/api_service.dart';
 import '../models/job.dart';
 import '../models/worker.dart';
 import 'employer_dashboard_screen.dart';
+import 'worker_cv_view_screen.dart';
 
 class EmployerMatchesScreen extends StatefulWidget {
   final int jobId;
@@ -265,9 +266,37 @@ class _EmployerMatchesScreenState extends State<EmployerMatchesScreen> {
               ],
             ),
             const SizedBox(height: 6),
-            Text(
-              '🛠 ${worker.skillType}  •  📍 ${worker.location}',
-              style: TextStyle(fontSize: 13, color: Colors.grey.shade700),
+            Row(
+              children: [
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFFEF3C7),
+                    borderRadius: BorderRadius.circular(4),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const Icon(Icons.star, size: 13, color: Color(0xFFD97706)),
+                      const SizedBox(width: 3),
+                      Text(
+                        worker.avgRating > 0
+                            ? '${worker.avgRating.toStringAsFixed(1)} ⭐ (${worker.ratingCount})'
+                            : 'New ⭐',
+                        style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 11, color: Color(0xFF92400E)),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    '🛠 ${worker.skillType}  •  📍 ${worker.location}',
+                    style: TextStyle(fontSize: 13, color: Colors.grey.shade700),
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+              ],
             ),
             if (isBusy && worker.currentLocationZone != null)
               Padding(
@@ -295,58 +324,86 @@ class _EmployerMatchesScreenState extends State<EmployerMatchesScreen> {
                       fontSize: 14,
                     ),
                   ),
-                  if (isBusy)
-                    Container(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 10,
-                        vertical: 5,
-                      ),
-                      decoration: BoxDecoration(
-                        color: Colors.grey.shade200,
-                        borderRadius: BorderRadius.circular(8),
-                      ),
-                      child: const Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Icon(Icons.lock_outline, color: Colors.grey, size: 14),
-                          SizedBox(width: 4),
-                          Text(
-                            'Busy on Job',
-                            style: TextStyle(
-                              color: Colors.black54,
-                              fontSize: 12,
-                              fontWeight: FontWeight.w700,
+                  Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      OutlinedButton.icon(
+                        style: OutlinedButton.styleFrom(
+                          foregroundColor: const Color(0xFF0284C7),
+                          side: const BorderSide(color: Color(0xFF0284C7)),
+                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                          visualDensity: VisualDensity.compact,
+                        ),
+                        icon: const Icon(Icons.description_outlined, size: 14),
+                        label: const Text('View CV', style: TextStyle(fontWeight: FontWeight.w700, fontSize: 12)),
+                        onPressed: () {
+                          Navigator.push(
+                            context,
+                            MaterialPageRoute(
+                              builder: (_) => WorkerCvViewScreen(
+                                worker: worker,
+                                forJob: _job,
+                              ),
                             ),
+                          );
+                        },
+                      ),
+                      const SizedBox(width: 8),
+                      if (isBusy)
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 10,
+                            vertical: 5,
                           ),
-                        ],
-                      ),
-                    )
-                  else
-                    Container(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 10,
-                        vertical: 4,
-                      ),
-                      decoration: BoxDecoration(
-                        color: const Color(0xFF10B981),
-                        borderRadius: BorderRadius.circular(8),
-                      ),
-                      child: const Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Icon(Icons.call, color: Colors.white, size: 14),
-                          SizedBox(width: 4),
-                          Text(
-                            'Call Worker',
-                            style: TextStyle(
-                              color: Colors.white,
-                              fontSize: 12,
-                              fontWeight: FontWeight.w700,
-                            ),
+                          decoration: BoxDecoration(
+                            color: Colors.grey.shade200,
+                            borderRadius: BorderRadius.circular(8),
                           ),
-                        ],
-                      ),
-                    ),
+                          child: const Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(Icons.lock_outline, color: Colors.grey, size: 14),
+                              SizedBox(width: 4),
+                              Text(
+                                'Busy on Job',
+                                style: TextStyle(
+                                  color: Colors.black54,
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.w700,
+                                ),
+                              ),
+                            ],
+                          ),
+                        )
+                      else
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 10,
+                            vertical: 4,
+                          ),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFF10B981),
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                          child: const Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(Icons.call, color: Colors.white, size: 14),
+                              SizedBox(width: 4),
+                              Text(
+                                'Call',
+                                style: TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.w700,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                    ],
+                  ),
                 ],
               ),
             ),

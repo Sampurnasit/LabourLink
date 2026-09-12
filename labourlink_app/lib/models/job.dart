@@ -1,3 +1,5 @@
+import 'worker.dart';
+
 class Job {
   final int id;
   final String employerName;
@@ -57,6 +59,9 @@ class InterestedWorker {
   final String location;
   final bool available;
   final String status;
+  final double avgRating;
+  final int ratingCount;
+  final bool hasCv;
 
   InterestedWorker({
     required this.workerId,
@@ -66,9 +71,25 @@ class InterestedWorker {
     required this.location,
     required this.available,
     required this.status,
+    this.avgRating = 0.0,
+    this.ratingCount = 0,
+    this.hasCv = false,
   });
 
   factory InterestedWorker.fromJson(Map<String, dynamic> json) {
+    final rawRating = json['avg_rating'];
+    final double parsedRating = rawRating != null
+        ? (double.tryParse(rawRating.toString()) ?? 0.0)
+        : 0.0;
+
+    final rawCount = json['rating_count'];
+    final int parsedCount = rawCount != null
+        ? (int.tryParse(rawCount.toString()) ?? 0)
+        : 0;
+
+    final bool parsedHasCv = json['has_cv'] == 1 ||
+                             json['has_cv'] == true;
+
     return InterestedWorker(
       workerId: json['worker_id'] is int
           ? json['worker_id']
@@ -79,6 +100,24 @@ class InterestedWorker {
       location: json['location'] ?? '',
       available: json['available'] == 1 || json['available'] == true,
       status: json['status'] ?? 'interested',
+      avgRating: parsedRating,
+      ratingCount: parsedCount,
+      hasCv: parsedHasCv,
+    );
+  }
+
+  Worker toWorker() {
+    return Worker(
+      id: workerId,
+      name: name,
+      phoneNumber: phoneNumber,
+      skillType: skillType,
+      location: location,
+      available: available,
+      status: status,
+      avgRating: avgRating,
+      ratingCount: ratingCount,
+      hasCv: hasCv,
     );
   }
 }

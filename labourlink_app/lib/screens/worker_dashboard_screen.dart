@@ -4,6 +4,7 @@ import '../services/api_service.dart';
 import '../models/worker.dart';
 import '../models/job.dart';
 import 'worker_register_screen.dart';
+import 'worker_cv_screen.dart';
 
 class WorkerDashboardScreen extends StatefulWidget {
   final String? initialPhone;
@@ -313,6 +314,13 @@ class _WorkerDashboardScreenState extends State<WorkerDashboardScreen> {
                               const Color(0xFFFEF3C7),
                               const Color(0xFF92400E),
                             ),
+                            _buildBadge(
+                              _worker!.avgRating > 0
+                                  ? '⭐ ${_worker!.avgRating.toStringAsFixed(1)} (${_worker!.ratingCount} ${_worker!.ratingCount == 1 ? 'review' : 'reviews'})'
+                                  : '⭐ New (No reviews)',
+                              const Color(0xFFFEF3C7),
+                              const Color(0xFFB45309),
+                            ),
                           ],
                         ),
                         const Divider(height: 24),
@@ -329,6 +337,69 @@ class _WorkerDashboardScreenState extends State<WorkerDashboardScreen> {
                               onChanged: _toggleAvailability,
                             ),
                           ],
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+
+                const SizedBox(height: 12),
+
+                // My CV / Resume Card
+                Card(
+                  elevation: 1,
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                  color: _worker!.hasCv ? const Color(0xFFF0FDF4) : const Color(0xFFFFFBEB),
+                  child: Padding(
+                    padding: const EdgeInsets.all(14),
+                    child: Row(
+                      children: [
+                        Icon(
+                          _worker!.hasCv ? Icons.verified_user_outlined : Icons.assignment_late_outlined,
+                          color: _worker!.hasCv ? const Color(0xFF15803D) : const Color(0xFFD97706),
+                          size: 30,
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                _worker!.hasCv ? 'Worker CV: Completed' : 'Profile / CV Incomplete',
+                                style: TextStyle(
+                                  fontWeight: FontWeight.w800,
+                                  fontSize: 13.5,
+                                  color: _worker!.hasCv ? const Color(0xFF15803D) : const Color(0xFFB45309),
+                                ),
+                              ),
+                              Text(
+                                _worker!.hasCv
+                                    ? 'Employers can view your verified work history & trades'
+                                    : 'Add past employers & skills to get hired faster',
+                                style: TextStyle(
+                                  fontSize: 12,
+                                  color: Colors.grey.shade700,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                        ElevatedButton(
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: _worker!.hasCv ? const Color(0xFF0284C7) : const Color(0xFFD97706),
+                            foregroundColor: Colors.white,
+                            visualDensity: VisualDensity.compact,
+                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                          ),
+                          onPressed: () {
+                            Navigator.push(
+                              context,
+                              MaterialPageRoute(
+                                builder: (_) => WorkerCvScreen(worker: _worker!),
+                              ),
+                            ).then((_) => _loadDashboard());
+                          },
+                          child: Text(_worker!.hasCv ? 'Edit CV' : 'Complete CV'),
                         ),
                       ],
                     ),

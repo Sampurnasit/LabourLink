@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../services/api_service.dart';
 import 'worker_dashboard_screen.dart';
+import 'worker_cv_screen.dart';
 
 class WorkerRegisterScreen extends StatefulWidget {
   const WorkerRegisterScreen({super.key});
@@ -99,7 +100,10 @@ class _WorkerRegisterScreenState extends State<WorkerRegisterScreen> {
       Navigator.pushReplacement(
         context,
         MaterialPageRoute(
-          builder: (_) => WorkerDashboardScreen(initialPhone: phone),
+          builder: (_) => WorkerCvScreen(
+            worker: worker,
+            isFirstTime: true,
+          ),
         ),
       );
     } else {

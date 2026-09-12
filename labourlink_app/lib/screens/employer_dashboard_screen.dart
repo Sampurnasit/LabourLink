@@ -3,6 +3,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../services/api_service.dart';
 import '../models/job.dart';
 import 'employer_post_job_screen.dart';
+import 'worker_cv_view_screen.dart';
 
 class EmployerDashboardScreen extends StatefulWidget {
   final String? initialPhone;
@@ -134,8 +135,8 @@ class _EmployerDashboardScreenState extends State<EmployerDashboardScreen> {
     );
 
     if (confirmed == true) {
-      final success = await ApiService.completeJob(job.id);
-      if (success && mounted) {
+      final result = await ApiService.completeJob(job.id);
+      if (result != null && mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
             content: Text(
@@ -144,9 +145,180 @@ class _EmployerDashboardScreenState extends State<EmployerDashboardScreen> {
             backgroundColor: Color(0xFF10B981),
           ),
         );
+
+        // Find worker info from response or applicants to prompt rating
+        int? workerId;
+        String workerName = 'Worker';
+
+        if (result['worker'] != null && result['worker'] is Map) {
+          final wMap = result['worker'] as Map;
+          workerId = int.tryParse(wMap['id']?.toString() ?? '');
+          workerName = wMap['name']?.toString() ?? 'Worker';
+        }
+
+        if (workerId == null && job.interestedWorkers != null && job.interestedWorkers!.isNotEmpty) {
+          final confirmedWorker = job.interestedWorkers!.firstWhere(
+            (w) => w.status == 'confirmed',
+            orElse: () => job.interestedWorkers!.first,
+          );
+          workerId = confirmedWorker.workerId;
+          workerName = confirmedWorker.name;
+        }
+
+        if (workerId != null) {
+          await _showRatingDialog(job, workerId, workerName);
+        }
+
         _loadJobs();
       }
     }
+  }
+
+  Future<void> _showRatingDialog(Job job, int workerId, String workerName) async {
+    // Check if already rated first
+    final isAlreadyRated = await ApiService.isJobRated(job.id, workerId: workerId);
+    if (isAlreadyRated) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('You have already submitted a rating for this completed job.'),
+          ),
+        );
+      }
+      return;
+    }
+
+    if (!mounted) return;
+
+    double selectedRating = 5.0;
+    final commentController = TextEditingController();
+    bool isSubmitting = false;
+
+    await showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (dialogCtx) => StatefulBuilder(
+        builder: (ctx, setDialogState) {
+          return AlertDialog(
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+            title: Row(
+              children: [
+                const Icon(Icons.stars, color: Color(0xFFF59E0B)),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    'Rate $workerName',
+                    style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w800),
+                  ),
+                ),
+              ],
+            ),
+            content: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'How was your experience working with $workerName on "${job.skillNeeded}" in ${job.location}?',
+                    style: TextStyle(fontSize: 13, color: Colors.grey.shade700),
+                  ),
+                  const SizedBox(height: 16),
+                  Center(
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: List.generate(5, (index) {
+                        final starIndex = index + 1;
+                        return IconButton(
+                          icon: Icon(
+                            starIndex <= selectedRating ? Icons.star : Icons.star_border,
+                            color: const Color(0xFFF59E0B),
+                            size: 32,
+                          ),
+                          onPressed: () {
+                            setDialogState(() => selectedRating = starIndex.toDouble());
+                          },
+                        );
+                      }),
+                    ),
+                  ),
+                  Center(
+                    child: Text(
+                      '${selectedRating.toStringAsFixed(1)} / 5.0 Stars',
+                      style: const TextStyle(
+                        fontWeight: FontWeight.w800,
+                        fontSize: 14,
+                        color: Color(0xFFD97706),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  TextField(
+                    controller: commentController,
+                    maxLines: 2,
+                    decoration: const InputDecoration(
+                      labelText: 'Write a review (optional)',
+                      hintText: 'e.g. Arrived on time, neat work, very polite',
+                      border: OutlineInputBorder(),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: isSubmitting ? null : () => Navigator.pop(dialogCtx),
+                child: const Text('Skip Rating'),
+              ),
+              FilledButton(
+                style: FilledButton.styleFrom(backgroundColor: const Color(0xFF10B981)),
+                onPressed: isSubmitting
+                    ? null
+                    : () async {
+                        setDialogState(() => isSubmitting = true);
+                        final empPhone = _phoneController.text.trim().isNotEmpty
+                            ? _phoneController.text.trim()
+                            : job.employerPhone;
+                        final res = await ApiService.rateWorker(
+                          workerId: workerId,
+                          jobId: job.id,
+                          employerPhone: empPhone,
+                          rating: selectedRating,
+                          comment: commentController.text.trim(),
+                        );
+                        if (dialogCtx.mounted) {
+                          Navigator.pop(dialogCtx);
+                        }
+                        if (mounted) {
+                          if (res['success'] == true) {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              const SnackBar(
+                                content: Text('✓ Thank you for rating the worker!'),
+                                backgroundColor: Color(0xFF10B981),
+                              ),
+                            );
+                          } else {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              SnackBar(
+                                content: Text(res['error'] ?? 'Could not submit rating.'),
+                                backgroundColor: Colors.orange.shade800,
+                              ),
+                            );
+                          }
+                        }
+                      },
+                child: isSubmitting
+                    ? const SizedBox(
+                        width: 16,
+                        height: 16,
+                        child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2),
+                      )
+                    : const Text('Submit Review'),
+              ),
+            ],
+          );
+        },
+      ),
+    );
   }
 
   @override
@@ -474,33 +646,93 @@ class _EmployerDashboardScreenState extends State<EmployerDashboardScreen> {
                           ),
                         ],
                       ),
-                      const SizedBox(height: 2),
-                      Text(
-                        '📞 ${worker.phoneNumber}  •  📍 ${worker.location}',
-                        style: TextStyle(
-                          fontSize: 12,
-                          color: Colors.grey.shade700,
-                        ),
-                      ),
-                      if (isOpen && !isConfirmed) ...[
-                        const SizedBox(height: 8),
-                        ElevatedButton.icon(
-                          style: ElevatedButton.styleFrom(
-                            backgroundColor: const Color(0xFF10B981),
-                            foregroundColor: Colors.white,
-                            minimumSize: const Size(double.infinity, 34),
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(8),
+                      const SizedBox(height: 4),
+                      Row(
+                        children: [
+                          Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
+                            decoration: BoxDecoration(
+                              color: const Color(0xFFFEF3C7),
+                              borderRadius: BorderRadius.circular(4),
+                            ),
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                const Icon(Icons.star, size: 12, color: Color(0xFFD97706)),
+                                const SizedBox(width: 3),
+                                Text(
+                                  worker.avgRating > 0
+                                      ? '${worker.avgRating.toStringAsFixed(1)} ⭐ (${worker.ratingCount})'
+                                      : 'New ⭐',
+                                  style: const TextStyle(
+                                    fontWeight: FontWeight.w800,
+                                    fontSize: 10.5,
+                                    color: Color(0xFF92400E),
+                                  ),
+                                ),
+                              ],
                             ),
                           ),
-                          icon: const Icon(Icons.check_circle, size: 16),
-                          label: const Text(
-                            '✓ Confirm This Worker',
-                            style: TextStyle(fontWeight: FontWeight.w700),
+                          const SizedBox(width: 6),
+                          Expanded(
+                            child: Text(
+                              '📞 ${worker.phoneNumber}  •  📍 ${worker.location}',
+                              style: TextStyle(
+                                fontSize: 12,
+                                color: Colors.grey.shade700,
+                              ),
+                              overflow: TextOverflow.ellipsis,
+                            ),
                           ),
-                          onPressed: () => _confirmWorker(job, worker),
-                        ),
-                      ],
+                        ],
+                      ),
+                      const SizedBox(height: 8),
+                      Row(
+                        children: [
+                          Expanded(
+                            child: OutlinedButton.icon(
+                              style: OutlinedButton.styleFrom(
+                                foregroundColor: const Color(0xFF0284C7),
+                                side: const BorderSide(color: Color(0xFF0284C7)),
+                                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+                                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                                visualDensity: VisualDensity.compact,
+                              ),
+                              icon: const Icon(Icons.description_outlined, size: 14),
+                              label: const Text('View CV', style: TextStyle(fontWeight: FontWeight.w700, fontSize: 12)),
+                              onPressed: () {
+                                Navigator.push(
+                                  context,
+                                  MaterialPageRoute(
+                                    builder: (_) => WorkerCvViewScreen(
+                                      worker: worker.toWorker(),
+                                      forJob: job,
+                                      onHire: isOpen && !isConfirmed ? () => _confirmWorker(job, worker) : null,
+                                    ),
+                                  ),
+                                );
+                              },
+                            ),
+                          ),
+                          if (isOpen && !isConfirmed) ...[
+                            const SizedBox(width: 8),
+                            Expanded(
+                              child: ElevatedButton.icon(
+                                style: ElevatedButton.styleFrom(
+                                  backgroundColor: const Color(0xFF10B981),
+                                  foregroundColor: Colors.white,
+                                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+                                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                                  visualDensity: VisualDensity.compact,
+                                ),
+                                icon: const Icon(Icons.check_circle, size: 14),
+                                label: const Text('Confirm', style: TextStyle(fontWeight: FontWeight.w700, fontSize: 12)),
+                                onPressed: () => _confirmWorker(job, worker),
+                              ),
+                            ),
+                          ],
+                        ],
+                      ),
                     ],
                   ),
                 );

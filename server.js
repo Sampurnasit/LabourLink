@@ -3,6 +3,7 @@ const express = require('express');
 const path = require('path');
 const cors = require('cors');
 const db = require('./database');
+const supabase = db.supabase || db;
 
 const app = express();
 const port = process.env.PORT || 3000;
@@ -66,37 +67,61 @@ function cleanPhone(phone) {
 
 // Helper to check worker active job conflict & cross-zone restrictions
 async function checkWorkerActiveConflict(workerId, targetJobId) {
-  const worker = await db.getAsync(
-    `SELECT w.*, j.location as active_job_location, j.status as active_job_status, j.date_needed as active_job_date
-     FROM workers w
-     LEFT JOIN jobs j ON w.current_active_job_id = j.id
-     WHERE w.id = ?`,
-    [workerId]
-  );
+  try {
+    const worker = await db.getAsync('SELECT * FROM workers WHERE id = ?', [workerId]);
 
-  if (!worker) {
-    return { hasConflict: false, notFound: true };
+    if (!worker) {
+      return { hasConflict: false, notFound: true };
+    }
+
+    // A worker is actively hired if available is 0/false or status is HIRED
+    const isActivelyEmployed = worker.available === 0 || worker.available === false || worker.status === 'HIRED' || worker.current_active_job_id !== null;
+
+    if (isActivelyEmployed) {
+      let targetJob = null;
+      if (targetJobId) {
+        targetJob = await db.getAsync('SELECT * FROM jobs WHERE id = ?', [targetJobId]);
+      }
+      const activeZone = worker.current_location_zone || worker.location;
+      const isDifferentArea = targetJob && activeZone && targetJob.location !== activeZone;
+
+      return {
+        hasConflict: true,
+        worker,
+        message: isDifferentArea
+          ? `You are currently assigned to an active job in another area (${activeZone}).`
+          : 'You are currently assigned to an active job and cannot apply for or accept new jobs.'
+      };
+    }
+
+    return { hasConflict: false, worker };
+  } catch (err) {
+    console.error('Error checking active conflict:', err);
+    return { hasConflict: false };
   }
+}
 
-  // Active if status is 'HIRED' or current_active_job_id exists and is not COMPLETED/CANCELLED
-  const isActivelyEmployed = worker.status === 'HIRED' ||
-    (worker.current_active_job_id && !['COMPLETED', 'CANCELLED'].includes(worker.active_job_status));
+// Helper: parse wage string into a numeric value (e.g. "₹850/day" -> 850)
+function parseWage(wageStr) {
+  if (!wageStr) return 0;
+  const num = parseInt(String(wageStr).replace(/[^0-9]/g, ''), 10);
+  return isNaN(num) ? 0 : num;
+}
 
-  if (isActivelyEmployed) {
-    const targetJob = targetJobId ? await db.getAsync('SELECT * FROM jobs WHERE id = ?', [targetJobId]) : null;
-    const activeZone = worker.current_location_zone || worker.active_job_location;
-    const isDifferentArea = targetJob && activeZone && targetJob.location !== activeZone;
+// Helper: mask display name -> first name + last initial (e.g. "Ramesh Kumar" -> "Ramesh K.")
+function maskName(fullName) {
+  if (!fullName) return 'Worker';
+  const parts = fullName.trim().split(/\s+/);
+  if (parts.length === 1) return parts[0];
+  return `${parts[0]} ${parts[parts.length - 1][0]}.`;
+}
 
-    return {
-      hasConflict: true,
-      worker,
-      message: isDifferentArea
-        ? `You are currently assigned to an active job in another area (${activeZone}).`
-        : 'You are currently assigned to an active job and cannot apply for or accept new jobs.'
-    };
-  }
-
-  return { hasConflict: false, worker };
+// Helper: mask phone number -> show only last 2 digits (e.g. ******89)
+function maskPhone(phone) {
+  if (!phone) return '******00';
+  const digits = String(phone).replace(/[^0-9]/g, '');
+  if (digits.length < 4) return '******';
+  return '•'.repeat(Math.max(0, digits.length - 2)) + digits.slice(-2);
 }
 
 // ==========================================================================
@@ -106,26 +131,107 @@ async function checkWorkerActiveConflict(workerId, targetJobId) {
 // 1. Platform Statistics
 app.get('/api/stats', async (req, res) => {
   try {
-    const totalWorkers = await db.getAsync('SELECT COUNT(*) as count FROM workers');
-    const availableWorkers = await db.getAsync('SELECT COUNT(*) as count FROM workers WHERE available = 1');
-    const openJobs = await db.getAsync("SELECT COUNT(*) as count FROM jobs WHERE status = 'open'");
-    const filledJobs = await db.getAsync("SELECT COUNT(*) as count FROM jobs WHERE status = 'filled'");
-    const totalInterests = await db.getAsync('SELECT COUNT(*) as count FROM job_interests');
+    const totalWorkers = (await db.getAsync('SELECT COUNT(*) as count FROM workers')).count;
+    const availableWorkers = (await db.getAsync('SELECT COUNT(*) as count FROM workers WHERE available = 1')).count;
+    const openJobs = (await db.getAsync("SELECT COUNT(*) as count FROM jobs WHERE status = 'open'")).count;
+    const filledJobs = (await db.getAsync("SELECT COUNT(*) as count FROM jobs WHERE status = 'filled'")).count;
+    const totalInterests = (await db.getAsync('SELECT COUNT(*) as count FROM job_interests')).count;
 
     res.json({
       status: 'ok',
-      totalWorkers: totalWorkers ? totalWorkers.count : 0,
-      availableWorkers: availableWorkers ? availableWorkers.count : 0,
-      openJobs: openJobs ? openJobs.count : 0,
-      filledJobs: filledJobs ? filledJobs.count : 0,
-      totalInterests: totalInterests ? totalInterests.count : 0
+      totalWorkers: totalWorkers || 0,
+      availableWorkers: availableWorkers || 0,
+      openJobs: openJobs || 0,
+      filledJobs: filledJobs || 0,
+      totalInterests: totalInterests || 0
     });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
 });
 
-// 2. Public / Filtered Jobs Feed
+// 2a. Public Jobs Feed — masked data, no auth required
+app.get('/api/public/jobs', async (req, res) => {
+  try {
+    const { skill, location, minWage, maxWage } = req.query;
+    let sql = "SELECT * FROM jobs WHERE status = 'open'";
+    const params = [];
+
+    if (skill) {
+      sql += " AND skill_needed = ?";
+      params.push(skill);
+    }
+    if (location) {
+      sql += " AND location = ?";
+      params.push(location);
+    }
+    sql += " ORDER BY id DESC LIMIT 50";
+
+    let rawJobs = await db.allAsync(sql, params);
+    if (minWage || maxWage) {
+      const min = minWage ? parseInt(minWage, 10) : 0;
+      const max = maxWage ? parseInt(maxWage, 10) : Infinity;
+      rawJobs = rawJobs.filter(j => {
+        const num = parseWage(j.wage_offered);
+        return num >= min && num <= max;
+      });
+    }
+
+    const publicJobs = rawJobs.map(j => ({
+      id: j.id,
+      employer_name: maskName(j.employer_name),
+      employer_phone_masked: maskPhone(j.employer_phone),
+      skill_needed: j.skill_needed,
+      location: j.location,
+      wage_offered: j.wage_offered,
+      date_needed: j.date_needed,
+      status: j.status,
+      created_at: j.created_at || null,
+    }));
+
+    res.json({ status: 'ok', count: publicJobs.length, jobs: publicJobs });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// 2b. Public Workers Feed — masked data, no auth required
+app.get('/api/public/workers', async (req, res) => {
+  try {
+    const { skill, location, availableOnly } = req.query;
+    let sql = "SELECT * FROM workers WHERE 1=1";
+    const params = [];
+
+    if (availableOnly === 'true') {
+      sql += " AND available = 1";
+    }
+    if (skill) {
+      sql += " AND skill_type = ?";
+      params.push(skill);
+    }
+    if (location) {
+      sql += " AND location = ?";
+      params.push(location);
+    }
+    sql += " ORDER BY available DESC, id DESC LIMIT 50";
+
+    const rawWorkers = await db.allAsync(sql, params);
+    const publicWorkers = rawWorkers.map(w => ({
+      id: w.id,
+      display_name: maskName(w.name),
+      skill_type: w.skill_type,
+      location: w.location,
+      available: w.available === 1 || w.available === true,
+      registered_at: w.registered_at || null,
+    }));
+
+    res.json({ status: 'ok', count: publicWorkers.length, workers: publicWorkers });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// 2. Open / Filtered Jobs Feed (Internal / Authenticated)
 app.get('/api/jobs', async (req, res) => {
   try {
     const { skill, location } = req.query;
@@ -133,17 +239,17 @@ app.get('/api/jobs', async (req, res) => {
     const params = [];
 
     if (skill) {
-      sql += ' AND skill_needed = ?';
+      sql += " AND skill_needed = ?";
       params.push(skill);
     }
     if (location) {
-      sql += ' AND location = ?';
+      sql += " AND location = ?";
       params.push(location);
     }
+    sql += " ORDER BY id DESC";
 
-    sql += ' ORDER BY id DESC';
     const jobs = await db.allAsync(sql, params);
-    res.json({ status: 'ok', jobs });
+    res.json({ status: 'ok', jobs: jobs || [] });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -172,16 +278,17 @@ app.post('/api/jobs', async (req, res) => {
   }
 });
 
-// 4. Get Single Job and Instant Matching Workers
+// 4. Instant Matches for a Job (Explorer View with Hired-by-Other indicator)
 app.get('/api/jobs/:id/matches', async (req, res) => {
   try {
-    const job = await db.getAsync('SELECT * FROM jobs WHERE id = ?', [req.params.id]);
+    const jobId = req.params.id;
+    const job = await db.getAsync('SELECT * FROM jobs WHERE id = ?', [jobId]);
+
     if (!job) {
       return res.status(404).json({ error: 'Job not found' });
     }
 
     // Direct matches: same skill + same location
-    // Both available workers and workers hired by other employers are returned
     const matchedWorkers = await db.allAsync(
       `SELECT w.*, 
               (CASE WHEN w.status = 'HIRED' OR w.current_active_job_id IS NOT NULL THEN 1 ELSE 0 END) as is_hired_by_other,
@@ -280,13 +387,17 @@ app.get('/api/workers/:phone', async (req, res) => {
 
     // Matched open jobs in worker's area
     const matchedJobs = await db.allAsync(
-      "SELECT * FROM jobs WHERE skill_needed = ? AND location = ? AND status = 'open' ORDER BY id DESC",
+      `SELECT * FROM jobs 
+       WHERE skill_needed = ? AND location = ? AND status = 'open' 
+       ORDER BY id DESC`,
       [worker.skill_type, worker.location]
     );
 
     // Other open jobs in that skill citywide
     const otherSkillJobs = await db.allAsync(
-      "SELECT * FROM jobs WHERE skill_needed = ? AND location != ? AND status = 'open' ORDER BY id DESC LIMIT 6",
+      `SELECT * FROM jobs 
+       WHERE skill_needed = ? AND location != ? AND status = 'open' 
+       ORDER BY id DESC LIMIT 6`,
       [worker.skill_type, worker.location]
     );
 
@@ -304,9 +415,9 @@ app.get('/api/workers/:phone', async (req, res) => {
       status: 'ok',
       worker,
       cv,
-      matchedJobs,
-      otherSkillJobs,
-      appliedJobs
+      matchedJobs: matchedJobs || [],
+      otherSkillJobs: otherSkillJobs || [],
+      appliedJobs: appliedJobs || []
     });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -321,10 +432,14 @@ app.post('/api/workers/interest', async (req, res) => {
       return res.status(400).json({ error: 'worker_id and job_id are required' });
     }
 
-    const conflict = await checkWorkerActiveConflict(worker_id, job_id);
-    if (conflict.notFound) {
-      return res.status(404).json({ error: 'Worker not found' });
+    const worker = await db.getAsync('SELECT * FROM workers WHERE id = ?', [worker_id]);
+    const job = await db.getAsync('SELECT * FROM jobs WHERE id = ?', [job_id]);
+
+    if (!worker || !job) {
+      return res.status(404).json({ error: 'Worker or Job not found' });
     }
+
+    const conflict = await checkWorkerActiveConflict(worker_id, job_id);
     if (conflict.hasConflict) {
       return res.status(409).json({ error: conflict.message });
     }
@@ -342,14 +457,19 @@ app.post('/api/workers/interest', async (req, res) => {
   }
 });
 
-// 8. Toggle Worker Availability
+// 8. Worker Availability Toggle
 app.post('/api/workers/toggle-availability', async (req, res) => {
   try {
-    const phone = cleanPhone(req.body.phone);
-    const available = req.body.available ? 1 : 0;
+    const { phone, available } = req.body;
+    const cleanP = cleanPhone(phone);
+    const isAvail = available ? 1 : 0;
 
-    await db.runAsync('UPDATE workers SET available = ? WHERE phone_number = ?', [available, phone]);
-    const worker = await db.getAsync('SELECT * FROM workers WHERE phone_number = ?', [phone]);
+    await db.runAsync('UPDATE workers SET available = ? WHERE phone_number = ?', [isAvail, cleanP]);
+    const worker = await db.getAsync('SELECT * FROM workers WHERE phone_number = ?', [cleanP]);
+
+    if (!worker) {
+      return res.status(404).json({ error: 'Worker not found' });
+    }
 
     res.json({ status: 'ok', worker });
   } catch (err) {
@@ -381,7 +501,7 @@ app.get('/api/employers/:phone/jobs', async (req, res) => {
       job.interestedWorkers = interestedWorkers;
     }
 
-    res.json({ status: 'ok', jobs });
+    res.json({ status: 'ok', jobs: jobs || [] });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -406,14 +526,12 @@ app.post('/api/employers/confirm-worker', async (req, res) => {
     }
 
     await db.runAsync(
-      "UPDATE job_interests SET status = 'confirmed' WHERE job_id = ? AND worker_id = ?",
+      `UPDATE job_interests SET status = 'confirmed' WHERE job_id = ? AND worker_id = ?`,
       [job_id, worker_id]
     );
     await db.runAsync("UPDATE jobs SET status = 'filled' WHERE id = ?", [job_id]);
     await db.runAsync(
-      `UPDATE workers 
-       SET status = 'HIRED', available = 0, current_active_job_id = ?, current_location_zone = ? 
-       WHERE id = ?`,
+      `UPDATE workers SET available = 0, status = 'HIRED', current_active_job_id = ?, current_location_zone = ? WHERE id = ?`,
       [job_id, job.location, worker_id]
     );
 
@@ -423,7 +541,7 @@ app.post('/api/employers/confirm-worker', async (req, res) => {
   }
 });
 
-// 11. Complete Job (releases labourer back to available)
+// 11. Complete Job (releases labourer back to available pool)
 app.post('/api/jobs/:id/complete', async (req, res) => {
   try {
     const jobId = req.params.id;
@@ -465,7 +583,7 @@ app.post('/api/jobs/:id/complete', async (req, res) => {
   }
 });
 
-// 12. Cancel Job (releases labourer back to available)
+// 12. Cancel Job (releases labourer back to available pool)
 app.post('/api/jobs/:id/cancel', async (req, res) => {
   try {
     const jobId = req.params.id;
@@ -476,9 +594,7 @@ app.post('/api/jobs/:id/cancel', async (req, res) => {
 
     await db.runAsync("UPDATE jobs SET status = 'cancelled' WHERE id = ?", [jobId]);
     await db.runAsync(
-      `UPDATE workers 
-       SET status = 'AVAILABLE', available = 1, current_active_job_id = NULL, current_location_zone = NULL 
-       WHERE current_active_job_id = ?`,
+      `UPDATE workers SET available = 1, status = 'AVAILABLE', current_active_job_id = NULL, current_location_zone = NULL WHERE current_active_job_id = ?`,
       [jobId]
     );
 
@@ -719,23 +835,20 @@ app.get('/api/jobs/:id/rating', async (req, res) => {
 // Home Page
 app.get('/', async (req, res) => {
   try {
-    const totalWorkersRow = await db.getAsync('SELECT COUNT(*) as count FROM workers');
-    const availWorkersRow = await db.getAsync('SELECT COUNT(*) as count FROM workers WHERE available = 1');
-    const openJobsRow = await db.getAsync("SELECT COUNT(*) as count FROM jobs WHERE status = 'open'");
-    const totalInterestsRow = await db.getAsync('SELECT COUNT(*) as count FROM job_interests');
+    const totalWorkers = (await db.getAsync('SELECT COUNT(*) as count FROM workers')).count;
+    const availableWorkers = (await db.getAsync('SELECT COUNT(*) as count FROM workers WHERE available = 1')).count;
+    const openJobs = (await db.getAsync("SELECT COUNT(*) as count FROM jobs WHERE status = 'open'")).count;
+    const totalInterests = (await db.getAsync('SELECT COUNT(*) as count FROM job_interests')).count;
+    const recentJobs = await db.allAsync("SELECT * FROM jobs WHERE status = 'open' ORDER BY id DESC LIMIT 6");
 
     const stats = {
-      totalWorkers: totalWorkersRow ? totalWorkersRow.count : 0,
-      availableWorkers: availWorkersRow ? availWorkersRow.count : 0,
-      openJobs: openJobsRow ? openJobsRow.count : 0,
-      totalInterests: totalInterestsRow ? totalInterestsRow.count : 0
+      totalWorkers: totalWorkers || 0,
+      availableWorkers: availableWorkers || 0,
+      openJobs: openJobs || 0,
+      totalInterests: totalInterests || 0
     };
 
-    const recentJobs = await db.allAsync(
-      "SELECT * FROM jobs WHERE status = 'open' ORDER BY id DESC LIMIT 6"
-    );
-
-    res.render('index', { stats, recentJobs });
+    res.render('index', { stats, recentJobs: recentJobs || [] });
   } catch (err) {
     console.error('Error rendering home page:', err);
     res.status(500).send('Internal Server Error');
@@ -784,6 +897,7 @@ app.get('/worker/dashboard', async (req, res) => {
   try {
     const phone = cleanPhone(req.query.phone);
     let successMessage = null;
+    let errorMessage = req.query.error || null;
 
     if (req.query.registered) {
       successMessage = 'Welcome to LabourLink! Your profile is registered and ready for matching.';
@@ -801,7 +915,8 @@ app.get('/worker/dashboard', async (req, res) => {
         otherSkillJobs: [],
         appliedJobs: [],
         interestedJobIds: [],
-        successMessage
+        successMessage,
+        errorMessage
       });
     }
 
@@ -815,7 +930,8 @@ app.get('/worker/dashboard', async (req, res) => {
         otherSkillJobs: [],
         appliedJobs: [],
         interestedJobIds: [],
-        successMessage
+        successMessage,
+        errorMessage
       });
     }
 
@@ -843,11 +959,12 @@ app.get('/worker/dashboard', async (req, res) => {
     res.render('worker-dashboard', {
       worker,
       phone,
-      matchedJobs,
-      otherSkillJobs,
+      matchedJobs: matchedJobs || [],
+      otherSkillJobs: otherSkillJobs || [],
       appliedJobs,
       interestedJobIds,
-      successMessage
+      successMessage,
+      errorMessage
     });
   } catch (err) {
     console.error('Error rendering worker dashboard:', err);
@@ -964,7 +1081,11 @@ app.get('/employer/post-success/:id', async (req, res) => {
       [job.skill_needed, job.location]
     );
 
-    res.render('employer-post-success', { job, matchedWorkers, nearbyWorkers });
+    res.render('employer-post-success', {
+      job,
+      matchedWorkers,
+      nearbyWorkers
+    });
   } catch (err) {
     console.error('Error loading post success:', err);
     res.status(500).send('Internal Server Error');
@@ -976,20 +1097,22 @@ app.get('/employer/dashboard', async (req, res) => {
   try {
     const phone = cleanPhone(req.query.phone);
     let successMessage = null;
+    let errorMessage = req.query.error || null;
 
     if (req.query.confirmed) {
       successMessage = 'Worker confirmed successfully! The job has been marked filled.';
     } else if (req.query.completed) {
-      successMessage = 'Job marked COMPLETED! The hired labourer is now freed and available for new work.';
+      successMessage = 'Job marked completed and labourer released back to available pool.';
     } else if (req.query.cancelled) {
-      successMessage = 'Job CANCELLED. The hired labourer is now freed.';
+      successMessage = 'Job cancelled and labourer released back to available pool.';
     }
 
     if (!phone) {
       return res.render('employer-dashboard', {
         jobs: [],
         phone: '',
-        successMessage
+        successMessage,
+        errorMessage
       });
     }
 
@@ -1014,9 +1137,10 @@ app.get('/employer/dashboard', async (req, res) => {
     }
 
     res.render('employer-dashboard', {
-      jobs,
+      jobs: jobs || [],
       phone,
-      successMessage
+      successMessage,
+      errorMessage
     });
   } catch (err) {
     console.error('Error rendering employer dashboard:', err);
@@ -1043,14 +1167,12 @@ app.post('/employer/confirm-worker', async (req, res) => {
     }
 
     await db.runAsync(
-      "UPDATE job_interests SET status = 'confirmed' WHERE job_id = ? AND worker_id = ?",
+      `UPDATE job_interests SET status = 'confirmed' WHERE job_id = ? AND worker_id = ?`,
       [job_id, worker_id]
     );
     await db.runAsync("UPDATE jobs SET status = 'filled' WHERE id = ?", [job_id]);
     await db.runAsync(
-      `UPDATE workers 
-       SET status = 'HIRED', available = 0, current_active_job_id = ?, current_location_zone = ? 
-       WHERE id = ?`,
+      `UPDATE workers SET available = 0, status = 'HIRED', current_active_job_id = ?, current_location_zone = ? WHERE id = ?`,
       [job_id, job.location, worker_id]
     );
 
@@ -1061,42 +1183,37 @@ app.post('/employer/confirm-worker', async (req, res) => {
   }
 });
 
-// Complete Job (Web route)
+// Web routes for complete and cancel job
 app.post('/employer/jobs/:id/complete', async (req, res) => {
   try {
     const jobId = req.params.id;
-    const phone = req.body.employer_phone;
+    const employerPhone = req.body.employer_phone || '';
 
     await db.runAsync("UPDATE jobs SET status = 'completed' WHERE id = ?", [jobId]);
     await db.runAsync(
-      `UPDATE workers 
-       SET status = 'AVAILABLE', available = 1, current_active_job_id = NULL, current_location_zone = NULL 
-       WHERE current_active_job_id = ?`,
+      `UPDATE workers SET available = 1, status = 'AVAILABLE', current_active_job_id = NULL, current_location_zone = NULL WHERE current_active_job_id = ?`,
       [jobId]
     );
 
-    res.redirect(`/employer/dashboard?phone=${encodeURIComponent(phone || '')}&completed=1`);
+    res.redirect(`/employer/dashboard?phone=${encodeURIComponent(employerPhone)}&completed=1`);
   } catch (err) {
     console.error('Error completing job:', err);
     res.redirect('/employer/dashboard');
   }
 });
 
-// Cancel Job (Web route)
 app.post('/employer/jobs/:id/cancel', async (req, res) => {
   try {
     const jobId = req.params.id;
-    const phone = req.body.employer_phone;
+    const employerPhone = req.body.employer_phone || '';
 
     await db.runAsync("UPDATE jobs SET status = 'cancelled' WHERE id = ?", [jobId]);
     await db.runAsync(
-      `UPDATE workers 
-       SET status = 'AVAILABLE', available = 1, current_active_job_id = NULL, current_location_zone = NULL 
-       WHERE current_active_job_id = ?`,
+      `UPDATE workers SET available = 1, status = 'AVAILABLE', current_active_job_id = NULL, current_location_zone = NULL WHERE current_active_job_id = ?`,
       [jobId]
     );
 
-    res.redirect(`/employer/dashboard?phone=${encodeURIComponent(phone || '')}&cancelled=1`);
+    res.redirect(`/employer/dashboard?phone=${encodeURIComponent(employerPhone)}&cancelled=1`);
   } catch (err) {
     console.error('Error cancelling job:', err);
     res.redirect('/employer/dashboard');
@@ -1104,35 +1221,120 @@ app.post('/employer/jobs/:id/cancel', async (req, res) => {
 });
 
 // Public Job Board (Digital Labor Chowk)
-app.get('/jobs', async (req, res) => {
+app.get(['/jobs', '/chowk-feed'], async (req, res) => {
   try {
-    const { skill, location } = req.query;
-    let sql = "SELECT * FROM jobs WHERE status = 'open'";
-    const params = [];
+    const { tab = 'jobs', skill, location, minWage, maxWage, availableOnly } = req.query;
 
+    let jobsSql = "SELECT * FROM jobs WHERE status = 'open'";
+    const jobsParams = [];
     if (skill) {
-      sql += ' AND skill_needed = ?';
-      params.push(skill);
+      jobsSql += " AND skill_needed = ?";
+      jobsParams.push(skill);
     }
     if (location) {
-      sql += ' AND location = ?';
-      params.push(location);
+      jobsSql += " AND location = ?";
+      jobsParams.push(location);
     }
+    jobsSql += " ORDER BY id DESC";
 
-    sql += ' ORDER BY id DESC';
-    const jobs = await db.allAsync(sql, params);
+    const rawJobs = await db.allAsync(jobsSql, jobsParams);
+    const min = minWage ? parseInt(minWage, 10) : null;
+    const max = maxWage ? parseInt(maxWage, 10) : null;
+
+    const jobs = (rawJobs || [])
+      .filter(j => {
+        const wage = parseWage(j.wage_offered);
+        if (min !== null && wage < min) return false;
+        if (max !== null && wage > max) return false;
+        return true;
+      })
+      .map(j => ({
+        id: j.id,
+        employer_name: maskName(j.employer_name),
+        skill_needed: j.skill_needed,
+        location: j.location,
+        wage_offered: j.wage_offered,
+        date_needed: j.date_needed,
+        status: j.status,
+        created_at: j.created_at || null
+      }));
+
+    let workersSql = "SELECT * FROM workers WHERE 1=1";
+    const workersParams = [];
+    if (availableOnly !== 'false') {
+      workersSql += " AND available = 1";
+    }
+    if (skill) {
+      workersSql += " AND skill_type = ?";
+      workersParams.push(skill);
+    }
+    if (location) {
+      workersSql += " AND location = ?";
+      workersParams.push(location);
+    }
+    workersSql += " ORDER BY available DESC, id DESC LIMIT 50";
+
+    const rawWorkers = await db.allAsync(workersSql, workersParams);
+    const workers = (rawWorkers || []).map(w => ({
+      id: w.id,
+      display_name: maskName(w.name),
+      skill_type: w.skill_type,
+      location: w.location,
+      available: w.available === 1 || w.available === true,
+      registered_at: w.registered_at || null
+    }));
 
     res.render('jobs-board', {
       jobs,
+      workers,
+      activeTab: tab,
       selectedSkill: skill || '',
-      selectedLocation: location || ''
+      selectedLocation: location || '',
+      minWage: minWage || '',
+      maxWage: maxWage || '',
+      availableOnly: availableOnly !== 'false'
     });
   } catch (err) {
-    console.error('Error fetching public jobs:', err);
+    console.error('Error fetching public jobs/workers:', err);
     res.status(500).send('Internal Server Error');
   }
 });
 
 app.listen(port, '0.0.0.0', () => {
-  console.log(`LabourLink server running at http://0.0.0.0:${port} (Local: http://localhost:${port}, Wi-Fi: http://192.168.0.161:${port})`);
+  console.log(`LabourLink server running at http://0.0.0.0:${port} (Local: http://localhost:${port})`);
+
+  // Automatically maintain USB reverse port forwarding for connected Android devices
+  try {
+    const { execFile } = require('child_process');
+    const fs = require('fs');
+    const defaultAdb = path.join(process.env.LOCALAPPDATA || '', 'Android', 'Sdk', 'platform-tools', 'adb.exe');
+    const adbPath = fs.existsSync(defaultAdb) ? defaultAdb : 'adb';
+
+    let isChecking = false;
+
+    function maintainAdbReverse() {
+      if (isChecking) return;
+      isChecking = true;
+
+      // Check if reverse forward is already established
+      execFile(adbPath, ['reverse', '--list'], (listErr, stdout) => {
+        if (!listErr && stdout && stdout.includes(`tcp:${port}`)) {
+          // Port is ALREADY active. Do NOT re-run adb reverse to avoid dropping in-flight requests!
+          isChecking = false;
+          return;
+        }
+
+        // Only run adb reverse if not already forwarded (e.g. freshly connected phone)
+        execFile(adbPath, ['reverse', `tcp:${port}`, `tcp:${port}`], () => {
+          isChecking = false;
+        });
+      });
+    }
+
+    maintainAdbReverse();
+    setInterval(maintainAdbReverse, 4000);
+    console.log(`Auto ADB reverse watcher active for Android devices on port ${port}`);
+  } catch (e) {
+    // Non-fatal if child_process/adb is unavailable
+  }
 });

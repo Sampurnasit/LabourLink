@@ -12,10 +12,10 @@ class ApiService {
 
   // Candidate URLs for auto-discovery
   static List<String> get candidateUrls => [
+    'http://127.0.0.1:3000',
     'http://localhost:3000',
     'http://10.0.2.2:3000',
     'http://192.168.0.161:3000',
-    'http://127.0.0.1:3000',
   ];
 
   static String get defaultBaseUrl {
@@ -24,9 +24,9 @@ class ApiService {
     }
     switch (defaultTargetPlatform) {
       case TargetPlatform.android:
-        return 'http://10.0.2.2:3000';
+        return 'http://192.168.0.148:3000'; // Physical device: use PC's LAN IP
       default:
-        return 'http://localhost:3000';
+        return 'http://127.0.0.1:3000';
     }
   }
 
@@ -36,21 +36,28 @@ class ApiService {
     try {
       final prefs = await SharedPreferences.getInstance();
       final savedUrl = prefs.getString('api_base_url');
-      if (savedUrl != null && savedUrl.trim().isNotEmpty) {
-        final ok = await testConnection(savedUrl.trim());
-        if (ok) {
-          baseUrl = savedUrl.trim().replaceAll(RegExp(r'/+$'), '');
-          return;
+      if (savedUrl != null) {
+        final clean = savedUrl.trim().replaceAll(RegExp(r'/+$'), '');
+        // Clear dead 10.0.2.2 or empty URLs
+        if (clean.contains('10.0.2.2') || clean.isEmpty) {
+          await prefs.remove('api_base_url');
+        } else {
+          final ok = await testConnection(clean);
+          if (ok) {
+            baseUrl = clean;
+            return;
+          } else {
+            await prefs.remove('api_base_url');
+          }
         }
       }
     } catch (_) {}
 
-    // Auto-discover the working server endpoint
+    // Auto-discover working endpoint
     await autoDiscoverServer();
   }
 
   static Future<bool> autoDiscoverServer() async {
-    // Probe all candidate URLs in parallel
     for (final candidate in candidateUrls) {
       final reachable = await testConnection(candidate);
       if (reachable) {
@@ -63,6 +70,7 @@ class ApiService {
         return true;
       }
     }
+    baseUrl = defaultBaseUrl;
     return false;
   }
 
@@ -79,18 +87,99 @@ class ApiService {
   static Future<bool> testConnection([String? candidateUrl]) async {
     try {
       final target = (candidateUrl ?? baseUrl).trim().replaceAll(RegExp(r'/+$'), '');
-      final res = await http.get(Uri.parse('$target/api/stats')).timeout(const Duration(milliseconds: 1800));
+      final res = await http.get(Uri.parse('$target/api/stats')).timeout(const Duration(seconds: 4));
       return res.statusCode == 200;
     } catch (_) {
       return false;
     }
   }
 
+  // Safe HTTP GET with auto-retry and auto-recovery to 127.0.0.1:3000
+  static Future<http.Response?> _safeGet(String path, {Map<String, String>? query}) async {
+    Uri buildUri(String base) {
+      final clean = base.replaceAll(RegExp(r'/+$'), '');
+      final fullUrl = '$clean$path';
+      final uri = Uri.parse(fullUrl);
+      if (query != null && query.isNotEmpty) {
+        return uri.replace(queryParameters: query);
+      }
+      return uri;
+    }
+
+    // Try primary baseUrl with 1 immediate retry on transient socket hiccups
+    for (int attempt = 0; attempt < 2; attempt++) {
+      try {
+        return await http.get(buildUri(baseUrl)).timeout(const Duration(seconds: 6));
+      } catch (e) {
+        if (attempt == 0) {
+          await Future.delayed(const Duration(milliseconds: 350));
+          continue;
+        }
+        debugPrint('GET $path failed on $baseUrl: $e');
+      }
+    }
+
+    // Fallback candidates if primary candidate failed
+    final fallbackCandidates = ['http://127.0.0.1:3000', 'http://localhost:3000'];
+    for (final fallbackUrl in fallbackCandidates) {
+      if (fallbackUrl == baseUrl) continue;
+      try {
+        final fallback = await http.get(buildUri(fallbackUrl)).timeout(const Duration(seconds: 5));
+        if (fallback.statusCode == 200) {
+          setBaseUrl(fallbackUrl);
+          return fallback;
+        }
+      } catch (_) {}
+    }
+    return null;
+  }
+
+  // Safe HTTP POST with auto-retry and auto-recovery to 127.0.0.1:3000
+  static Future<http.Response?> _safePost(String path, Map<String, dynamic> body) async {
+    Uri buildUri(String base) {
+      final clean = base.replaceAll(RegExp(r'/+$'), '');
+      return Uri.parse('$clean$path');
+    }
+
+    for (int attempt = 0; attempt < 2; attempt++) {
+      try {
+        return await http.post(
+          buildUri(baseUrl),
+          headers: {'Content-Type': 'application/json'},
+          body: jsonEncode(body),
+        ).timeout(const Duration(seconds: 6));
+      } catch (e) {
+        if (attempt == 0) {
+          await Future.delayed(const Duration(milliseconds: 350));
+          continue;
+        }
+        debugPrint('POST $path failed on $baseUrl: $e');
+      }
+    }
+
+    final fallbackCandidates = ['http://127.0.0.1:3000', 'http://localhost:3000'];
+    for (final fallbackUrl in fallbackCandidates) {
+      if (fallbackUrl == baseUrl) continue;
+      try {
+        final fallback = await http.post(
+          buildUri(fallbackUrl),
+          headers: {'Content-Type': 'application/json'},
+          body: jsonEncode(body),
+        ).timeout(const Duration(seconds: 5));
+        if (fallback.statusCode >= 200 && fallback.statusCode < 300) {
+          setBaseUrl(fallbackUrl);
+          return fallback;
+        }
+      } catch (_) {}
+    }
+    return null;
+  }
+
   // 1. Platform Statistics
   static Future<Map<String, dynamic>> getStats() async {
     try {
-      final res = await http.get(Uri.parse('$baseUrl/api/stats')).timeout(requestTimeout);
-      if (res.statusCode == 200) {
+      final res = await _safeGet('/api/stats');
+      if (res != null && res.statusCode == 200) {
         return jsonDecode(res.body) as Map<String, dynamic>;
       }
       return {};
@@ -100,16 +189,14 @@ class ApiService {
     }
   }
 
-  // 2. Open Jobs Feed
+  // 2. Open Jobs Feed (authenticated/internal)
   static Future<List<Job>> getJobs({String? skill, String? location}) async {
     try {
-      final uri = Uri.parse('$baseUrl/api/jobs').replace(queryParameters: {
+      final res = await _safeGet('/api/jobs', query: {
         if (skill != null && skill.isNotEmpty) 'skill': skill,
         if (location != null && location.isNotEmpty) 'location': location,
       });
-
-      final res = await http.get(uri).timeout(requestTimeout);
-      if (res.statusCode == 200) {
+      if (res != null && res.statusCode == 200) {
         final data = jsonDecode(res.body);
         final list = data['jobs'] as List? ?? [];
         return list.map((j) => Job.fromJson(j)).toList();
@@ -117,6 +204,61 @@ class ApiService {
       return [];
     } catch (e) {
       debugPrint('Error getting jobs: $e');
+      return [];
+    }
+  }
+
+  // 2a. Public Jobs Feed — masked data, no auth required
+  static Future<List<Job>> getPublicJobs({
+    String? skill,
+    String? location,
+    int? minWage,
+    int? maxWage,
+  }) async {
+    try {
+      final uri =
+          Uri.parse('$baseUrl/api/public/jobs').replace(queryParameters: {
+        if (skill != null && skill.isNotEmpty) 'skill': skill,
+        if (location != null && location.isNotEmpty) 'location': location,
+        if (minWage != null) 'minWage': '$minWage',
+        if (maxWage != null) 'maxWage': '$maxWage',
+      });
+
+      final res = await http.get(uri);
+      if (res.statusCode == 200) {
+        final data = jsonDecode(res.body);
+        final list = data['jobs'] as List? ?? [];
+        return list.map((j) => Job.fromJson(j)).toList();
+      }
+      return [];
+    } catch (e) {
+      debugPrint('Error getting public jobs: $e');
+      return [];
+    }
+  }
+
+  // 2b. Public Workers Feed — masked data, no auth required
+  static Future<List<Map<String, dynamic>>> getPublicWorkers({
+    String? skill,
+    String? location,
+    bool availableOnly = true,
+  }) async {
+    try {
+      final uri =
+          Uri.parse('$baseUrl/api/public/workers').replace(queryParameters: {
+        if (skill != null && skill.isNotEmpty) 'skill': skill,
+        if (location != null && location.isNotEmpty) 'location': location,
+        'availableOnly': availableOnly ? 'true' : 'false',
+      });
+
+      final res = await http.get(uri);
+      if (res.statusCode == 200) {
+        final data = jsonDecode(res.body);
+        return List<Map<String, dynamic>>.from(data['workers'] ?? []);
+      }
+      return [];
+    } catch (e) {
+      debugPrint('Error getting public workers: $e');
       return [];
     }
   }
@@ -131,20 +273,16 @@ class ApiService {
     required String dateNeeded,
   }) async {
     try {
-      final res = await http.post(
-        Uri.parse('$baseUrl/api/jobs'),
-        headers: {'Content-Type': 'application/json'},
-        body: jsonEncode({
-          'employer_name': employerName,
-          'employer_phone': employerPhone,
-          'skill_needed': skillNeeded,
-          'location': location,
-          'wage_offered': wageOffered,
-          'date_needed': dateNeeded,
-        }),
-      ).timeout(requestTimeout);
+      final res = await _safePost('/api/jobs', {
+        'employer_name': employerName,
+        'employer_phone': employerPhone,
+        'skill_needed': skillNeeded,
+        'location': location,
+        'wage_offered': wageOffered,
+        'date_needed': dateNeeded,
+      });
 
-      if (res.statusCode == 201) {
+      if (res != null && res.statusCode == 201) {
         final data = jsonDecode(res.body);
         return Job.fromJson(data['job']);
       }
@@ -158,8 +296,8 @@ class ApiService {
   // 4. Instant Matches for a Job
   static Future<Map<String, dynamic>?> getJobMatches(int jobId) async {
     try {
-      final res = await http.get(Uri.parse('$baseUrl/api/jobs/$jobId/matches')).timeout(requestTimeout);
-      if (res.statusCode == 200) {
+      final res = await _safeGet('/api/jobs/$jobId/matches');
+      if (res != null && res.statusCode == 200) {
         final data = jsonDecode(res.body);
         final job = Job.fromJson(data['job']);
         final matchedWorkers = (data['matchedWorkers'] as List? ?? [])
@@ -191,19 +329,15 @@ class ApiService {
     required bool available,
   }) async {
     try {
-      final res = await http.post(
-        Uri.parse('$baseUrl/api/workers/register'),
-        headers: {'Content-Type': 'application/json'},
-        body: jsonEncode({
-          'name': name,
-          'phone_number': phoneNumber,
-          'skill_type': skillType,
-          'location': location,
-          'available': available,
-        }),
-      ).timeout(requestTimeout);
+      final res = await _safePost('/api/workers/register', {
+        'name': name,
+        'phone_number': phoneNumber,
+        'skill_type': skillType,
+        'location': location,
+        'available': available,
+      });
 
-      if (res.statusCode == 200) {
+      if (res != null && res.statusCode == 200) {
         final data = jsonDecode(res.body);
         return Worker.fromJson(data['worker']);
       }
@@ -217,8 +351,8 @@ class ApiService {
   // 6. Get Worker Profile & Matched Jobs by Phone
   static Future<Map<String, dynamic>?> getWorkerProfile(String phone) async {
     try {
-      final res = await http.get(Uri.parse('$baseUrl/api/workers/$phone')).timeout(requestTimeout);
-      if (res.statusCode == 200) {
+      final res = await _safeGet('/api/workers/$phone');
+      if (res != null && res.statusCode == 200) {
         final data = jsonDecode(res.body);
         return {
           'worker': Worker.fromJson(data['worker']),
@@ -243,15 +377,11 @@ class ApiService {
   // 7. Express Interest in a Job
   static Future<bool> expressInterest(int workerId, int jobId) async {
     try {
-      final res = await http.post(
-        Uri.parse('$baseUrl/api/workers/interest'),
-        headers: {'Content-Type': 'application/json'},
-        body: jsonEncode({
-          'worker_id': workerId,
-          'job_id': jobId,
-        }),
-      ).timeout(requestTimeout);
-      return res.statusCode == 200;
+      final res = await _safePost('/api/workers/interest', {
+        'worker_id': workerId,
+        'job_id': jobId,
+      });
+      return res != null && res.statusCode == 200;
     } catch (e) {
       debugPrint('Error expressing interest: $e');
       return false;
@@ -261,16 +391,12 @@ class ApiService {
   // 8. Toggle Worker Availability
   static Future<Worker?> toggleAvailability(String phone, bool available) async {
     try {
-      final res = await http.post(
-        Uri.parse('$baseUrl/api/workers/toggle-availability'),
-        headers: {'Content-Type': 'application/json'},
-        body: jsonEncode({
-          'phone': phone,
-          'available': available,
-        }),
-      ).timeout(requestTimeout);
+      final res = await _safePost('/api/workers/toggle-availability', {
+        'phone': phone,
+        'available': available,
+      });
 
-      if (res.statusCode == 200) {
+      if (res != null && res.statusCode == 200) {
         final data = jsonDecode(res.body);
         return Worker.fromJson(data['worker']);
       }
@@ -284,8 +410,8 @@ class ApiService {
   // 9. Get Employer's Posted Jobs
   static Future<List<Job>> getEmployerJobs(String phone) async {
     try {
-      final res = await http.get(Uri.parse('$baseUrl/api/employers/$phone/jobs')).timeout(requestTimeout);
-      if (res.statusCode == 200) {
+      final res = await _safeGet('/api/employers/$phone/jobs');
+      if (res != null && res.statusCode == 200) {
         final data = jsonDecode(res.body);
         final list = data['jobs'] as List? ?? [];
         return list.map((j) => Job.fromJson(j)).toList();
@@ -300,15 +426,11 @@ class ApiService {
   // 10. Confirm an Interested Worker
   static Future<bool> confirmWorker(int jobId, int workerId) async {
     try {
-      final res = await http.post(
-        Uri.parse('$baseUrl/api/employers/confirm-worker'),
-        headers: {'Content-Type': 'application/json'},
-        body: jsonEncode({
-          'job_id': jobId,
-          'worker_id': workerId,
-        }),
-      ).timeout(requestTimeout);
-      return res.statusCode == 200;
+      final res = await _safePost('/api/employers/confirm-worker', {
+        'job_id': jobId,
+        'worker_id': workerId,
+      });
+      return res != null && res.statusCode == 200;
     } catch (e) {
       debugPrint('Error confirming worker: $e');
       return false;
@@ -318,11 +440,8 @@ class ApiService {
   // 11. Complete a Job (Frees up labourer and returns assigned worker info)
   static Future<Map<String, dynamic>?> completeJob(int jobId) async {
     try {
-      final res = await http.post(
-        Uri.parse('$baseUrl/api/jobs/$jobId/complete'),
-        headers: {'Content-Type': 'application/json'},
-      ).timeout(requestTimeout);
-      if (res.statusCode == 200) {
+      final res = await _safePost('/api/jobs/$jobId/complete', {});
+      if (res != null && res.statusCode == 200) {
         return jsonDecode(res.body) as Map<String, dynamic>;
       }
       return null;
@@ -335,11 +454,8 @@ class ApiService {
   // 12. Cancel a Job (Frees up labourer)
   static Future<bool> cancelJob(int jobId) async {
     try {
-      final res = await http.post(
-        Uri.parse('$baseUrl/api/jobs/$jobId/cancel'),
-        headers: {'Content-Type': 'application/json'},
-      ).timeout(requestTimeout);
-      return res.statusCode == 200;
+      final res = await _safePost('/api/jobs/$jobId/cancel', {});
+      return res != null && res.statusCode == 200;
     } catch (e) {
       debugPrint('Error cancelling job: $e');
       return false;
@@ -349,8 +465,8 @@ class ApiService {
   // 13. Get Worker CV (Structured Form Data)
   static Future<WorkerCv?> getWorkerCv(int workerId) async {
     try {
-      final res = await http.get(Uri.parse('$baseUrl/api/workers/$workerId/cv')).timeout(requestTimeout);
-      if (res.statusCode == 200) {
+      final res = await _safeGet('/api/workers/$workerId/cv');
+      if (res != null && res.statusCode == 200) {
         final data = jsonDecode(res.body);
         if (data['has_cv'] == true && data['cv'] != null) {
           return WorkerCv.fromJson(data['cv']);
@@ -366,12 +482,8 @@ class ApiService {
   // 14. Save Worker CV
   static Future<bool> saveWorkerCv(int workerId, Map<String, dynamic> cvData) async {
     try {
-      final res = await http.post(
-        Uri.parse('$baseUrl/api/workers/$workerId/cv'),
-        headers: {'Content-Type': 'application/json'},
-        body: jsonEncode(cvData),
-      ).timeout(requestTimeout);
-      return res.statusCode == 200;
+      final res = await _safePost('/api/workers/$workerId/cv', cvData);
+      return res != null && res.statusCode == 200;
     } catch (e) {
       debugPrint('Error saving worker CV: $e');
       return false;
@@ -387,22 +499,21 @@ class ApiService {
     String? comment,
   }) async {
     try {
-      final res = await http.post(
-        Uri.parse('$baseUrl/api/workers/$workerId/ratings'),
-        headers: {'Content-Type': 'application/json'},
-        body: jsonEncode({
-          'job_id': jobId,
-          'employer_phone': employerPhone,
-          'rating': rating,
-          'comment': comment ?? '',
-        }),
-      ).timeout(requestTimeout);
-      final data = jsonDecode(res.body) as Map<String, dynamic>;
-      return {
-        'success': res.statusCode == 200,
-        'status': res.statusCode,
-        ...data,
-      };
+      final res = await _safePost('/api/workers/$workerId/ratings', {
+        'job_id': jobId,
+        'employer_phone': employerPhone,
+        'rating': rating,
+        'comment': comment ?? '',
+      });
+      if (res != null) {
+        final data = jsonDecode(res.body) as Map<String, dynamic>;
+        return {
+          'success': res.statusCode == 200,
+          'status': res.statusCode,
+          ...data,
+        };
+      }
+      return {'success': false, 'error': 'No response from server'};
     } catch (e) {
       debugPrint('Error rating worker: $e');
       return {'success': false, 'error': e.toString()};
@@ -412,8 +523,8 @@ class ApiService {
   // 16. Get Worker Ratings & Reviews
   static Future<Map<String, dynamic>?> getWorkerRatings(int workerId) async {
     try {
-      final res = await http.get(Uri.parse('$baseUrl/api/workers/$workerId/ratings')).timeout(requestTimeout);
-      if (res.statusCode == 200) {
+      final res = await _safeGet('/api/workers/$workerId/ratings');
+      if (res != null && res.statusCode == 200) {
         return jsonDecode(res.body) as Map<String, dynamic>;
       }
       return null;
@@ -426,10 +537,10 @@ class ApiService {
   // 17. Check if Job is already rated
   static Future<bool> isJobRated(int jobId, {int? workerId}) async {
     try {
-      var url = '$baseUrl/api/jobs/$jobId/rating';
-      if (workerId != null) url += '?worker_id=$workerId';
-      final res = await http.get(Uri.parse(url)).timeout(requestTimeout);
-      if (res.statusCode == 200) {
+      var query = <String, String>{};
+      if (workerId != null) query['worker_id'] = '$workerId';
+      final res = await _safeGet('/api/jobs/$jobId/rating', query: query);
+      if (res != null && res.statusCode == 200) {
         final data = jsonDecode(res.body);
         return data['is_rated'] == true;
       }

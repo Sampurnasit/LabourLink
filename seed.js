@@ -3,7 +3,7 @@ const db = require('./database');
 async function seed() {
   console.log('Seeding demo data for LabourLink...');
 
-  // Clear existing records
+  // Clear existing records in local SQLite
   await db.runAsync('DELETE FROM worker_ratings');
   await db.runAsync('DELETE FROM worker_cv');
   await db.runAsync('DELETE FROM job_interests');
@@ -21,7 +21,7 @@ async function seed() {
     { name: 'Suresh Patel', phone_number: '9876500002', skill_type: 'Painting', location: 'Indiranagar', available: 1 },
     { name: 'Mohammed Rafiq', phone_number: '9876500003', skill_type: 'Plumbing', location: 'Koramangala', available: 1 },
     { name: 'Anil Yadav', phone_number: '9876500004', skill_type: 'Loading', location: 'Whitefield', available: 1 },
-    { name: 'Sunita Devi', phone_number: '9876500005', skill_type: 'Domestic Help', location: 'HSR Layout', available: 1 },
+    { name: 'Sunita Devi', phone_number: '9876500005', skill_type: 'Domestic Help', location: 'HSR Layout', available: 0 },
     { name: 'Vijay Sharma', phone_number: '9876500006', skill_type: 'Construction', location: 'HSR Layout', available: 1 },
     { name: 'Dinesh Verma', phone_number: '9876500007', skill_type: 'Painting', location: 'Koramangala', available: 1 },
     { name: 'Rajesh Goud', phone_number: '9876500008', skill_type: 'Plumbing', location: 'Indiranagar', available: 1 },
@@ -33,11 +33,11 @@ async function seed() {
 
   const workerMap = {};
   for (const w of workers) {
-    const res = await db.runAsync(
+    const result = await db.runAsync(
       `INSERT INTO workers (name, phone_number, skill_type, location, available) VALUES (?, ?, ?, ?, ?)`,
       [w.name, w.phone_number, w.skill_type, w.location, w.available]
     );
-    workerMap[w.phone_number] = res.lastID;
+    workerMap[w.phone_number] = result.lastID;
   }
   console.log(`✓ Seeded ${workers.length} workers`);
 
@@ -110,39 +110,50 @@ async function seed() {
 
   const jobIds = [];
   for (const j of jobs) {
-    const res = await db.runAsync(
-      `INSERT INTO jobs (employer_name, employer_phone, skill_needed, location, wage_offered, date_needed, status)
-       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+    const result = await db.runAsync(
+      `INSERT INTO jobs (employer_name, employer_phone, skill_needed, location, wage_offered, date_needed, status) VALUES (?, ?, ?, ?, ?, ?, ?)`,
       [j.employer_name, j.employer_phone, j.skill_needed, j.location, j.wage_offered, j.date_needed, j.status]
     );
-    jobIds.push(res.lastID);
+    jobIds.push(result.lastID);
   }
   console.log(`✓ Seeded ${jobs.length} jobs`);
 
   // 3. Seed sample interests using dynamic IDs
-  // Anand Buildcon (Job 0) has Ramesh Kumar (9876500001) interested
-  await db.runAsync(
-    `INSERT INTO job_interests (job_id, worker_id, status) VALUES (?, ?, 'interested')`,
-    [jobIds[0], workerMap['9876500001']]
-  );
-  // Arun Mehra (Job 3) has Mohammed Rafiq (9876500003) interested
-  await db.runAsync(
-    `INSERT INTO job_interests (job_id, worker_id, status) VALUES (?, ?, 'interested')`,
-    [jobIds[3], workerMap['9876500003']]
-  );
-  // Kavita Reddy (Job 4) confirmed Sunita Devi (9876500005) on Domestic Help in HSR Layout
-  await db.runAsync(
-    `INSERT INTO job_interests (job_id, worker_id, status) VALUES (?, ?, 'confirmed')`,
-    [jobIds[4], workerMap['9876500005']]
-  );
+  const interests = [
+    {
+      job_id: jobIds[0],
+      worker_id: workerMap['9876500001'],
+      status: 'interested'
+    },
+    {
+      job_id: jobIds[3],
+      worker_id: workerMap['9876500003'],
+      status: 'interested'
+    },
+    {
+      job_id: jobIds[4],
+      worker_id: workerMap['9876500005'],
+      status: 'confirmed'
+    }
+  ];
 
-  // Update Sunita Devi's status to HIRED, locked to Job 4 in HSR Layout
-  await db.runAsync(
-    `UPDATE workers 
-     SET status = 'HIRED', available = 0, current_active_job_id = ?, current_location_zone = 'HSR Layout'
-     WHERE id = ?`,
-    [jobIds[4], workerMap['9876500005']]
-  );
+  for (const item of interests) {
+    if (item.worker_id && item.job_id) {
+      await db.runAsync(
+        `INSERT INTO job_interests (job_id, worker_id, status) VALUES (?, ?, ?)`,
+        [item.job_id, item.worker_id, item.status]
+      );
+    }
+  }
+
+  // Set worker 5 current active job for demo
+  const sunitaId = workerMap['9876500005'];
+  if (sunitaId && jobIds[4]) {
+    await db.runAsync(
+      `UPDATE workers SET status = 'HIRED', current_active_job_id = ?, current_location_zone = 'HSR Layout' WHERE id = ?`,
+      [jobIds[4], sunitaId]
+    );
+  }
 
   // 4. Seed sample Worker CVs
   const rameshId = workerMap['9876500001'];
@@ -233,6 +244,17 @@ async function seed() {
        VALUES (?, '9900112255', ?, 4.6, 'Very clean painter, no drips or mess left behind. Highly recommend.')`,
       [sureshId, jobIds[6]]
     );
+  }
+
+  // Also sync to Supabase if configured
+  if (db.isSupabaseConfigured) {
+    try {
+      console.log('Syncing seeded records to Supabase...');
+      const syncRes = await db.syncToSupabase();
+      console.log('Supabase sync status:', syncRes);
+    } catch (sErr) {
+      console.warn('Note syncing to Supabase:', sErr.message);
+    }
   }
 
   console.log('✓ Seeded sample job interests, active bookings, worker CVs, and ratings');

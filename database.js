@@ -31,9 +31,6 @@ const db = new sqlite3.Database(dbPath, (err) => {
   }
 });
 
-// Enable foreign keys
-db.run('PRAGMA foreign_keys = ON');
-
 // Initialize database schema according to LabourLink specifications
 function initSchema() {
   return new Promise((resolve, reject) => {
@@ -172,6 +169,7 @@ db.allAsync = function (sql, params = []) {
 db.initSchema = initSchema;
 db.supabase = supabase;
 db.isSupabaseConfigured = isSupabaseConfigured;
+db.isConfigured = isSupabaseConfigured;
 
 // Helper to sync local records to Supabase cloud
 db.syncToSupabase = async function() {
@@ -201,3 +199,4 @@ db.syncToSupabase = async function() {
 module.exports = db;
 module.exports.supabase = supabase;
 module.exports.isSupabaseConfigured = isSupabaseConfigured;
+module.exports.isConfigured = isSupabaseConfigured;

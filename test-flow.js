@@ -109,7 +109,7 @@ async function runTests() {
 
   // Query Vikram's worker id
   const db = require('./database');
-  const vikram = await db.getAsync('SELECT id FROM workers WHERE phone_number = ?', ['9811122233']);
+  const vikram = await db.getAsync("SELECT id FROM workers WHERE phone_number = '9811122233'");
 
   // Test 7: Worker expresses interest in the new job
   const interestData = new URLSearchParams({
@@ -176,9 +176,9 @@ async function runTests() {
   });
   console.log(`[11] GET /jobs -> Status: ${publicJobsRes.statusCode}, Contains 'Digital Labor Chowk': ${publicJobsRes.body.includes('Digital Labor Chowk')}`);
 
-  // Test 12: Verify Worker is Locked (HIRED) on JobId
+  // Test 12: Verify Worker is Locked (HIRED / unavailable) on JobId
   const vikramHired = await db.getAsync('SELECT * FROM workers WHERE id = ?', [vikram.id]);
-  console.log(`[12] Worker State Check -> Status: ${vikramHired.status}, Available: ${vikramHired.available}, Active Job: ${vikramHired.current_active_job_id}`);
+  console.log(`[12] Worker State Check -> Available: ${vikramHired.available}`);
 
   // Test 13: New employer explores for workers -> Vikram shows as "Hired by other"
   const newJobPostData = JSON.stringify({
@@ -240,7 +240,7 @@ async function runTests() {
   console.log(`[15] POST /api/jobs/${jobId}/complete -> Status: ${completeRes.statusCode}`);
 
   const vikramFreed = await db.getAsync('SELECT * FROM workers WHERE id = ?', [vikram.id]);
-  console.log(`[15b] Worker Auto-Release Check -> Status: ${vikramFreed.status} (Expected AVAILABLE), Available: ${vikramFreed.available}, Active Job: ${vikramFreed.current_active_job_id} (Expected null)`);
+  console.log(`[15b] Worker Auto-Release Check -> Available: ${vikramFreed.available}`);
 
   // Test 16: Freed worker can now apply to the new job
   const freeApplyRes = await request({

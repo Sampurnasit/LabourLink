@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'services/api_service.dart';
 import 'screens/home_screen.dart';
+import 'screens/landing_screen.dart';
 import 'screens/worker_dashboard_screen.dart';
 import 'screens/employer_dashboard_screen.dart';
 import 'screens/public_board_screen.dart';
@@ -52,7 +53,14 @@ class LabourLinkApp extends StatelessWidget {
       theme: baseTheme.copyWith(
         textTheme: GoogleFonts.plusJakartaSansTextTheme(baseTheme.textTheme),
       ),
-      home: const MainNavigationShell(),
+      // Landing screen is shown first; '/app' takes the user into the main shell
+      initialRoute: '/landing',
+      routes: {
+        '/landing': (_) => const LandingScreen(),
+        '/app': (_) => const MainNavigationShell(),
+        '/jobs': (_) => const PublicBoardScreen(),
+        '/chowk-feed': (_) => const PublicBoardScreen(),
+      },
     );
   }
 }
@@ -112,3 +120,4 @@ class _MainNavigationShellState extends State<MainNavigationShell> {
     );
   }
 }
+

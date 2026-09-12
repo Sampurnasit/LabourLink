@@ -1,0 +1,12 @@
+{
+  "watch": ["server.js", "database.js", "supabase.js", "views"],
+  "ignore": [
+    "*.db",
+    "*.db-journal",
+    "labourlink.db*",
+    "*.log",
+    "labourlink_app/**",
+    "node_modules/**"
+  ],
+  "ext": "js,ejs,json"
+}

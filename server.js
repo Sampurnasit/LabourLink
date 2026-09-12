@@ -34,9 +34,26 @@ app.use((req, res, next) => {
   next();
 });
 
+// Process-level crash prevention for dropped connections and unhandled promises
+process.on('unhandledRejection', (reason, promise) => {
+  console.error('⚠️ [Server] Unhandled Promise Rejection (Prevented Crash):', reason);
+});
+process.on('uncaughtException', (err) => {
+  console.error('⚠️ [Server] Uncaught Exception (Prevented Crash):', err.message || err);
+});
+
 // Health check endpoint
 app.get('/api/health', (req, res) => {
   res.json({ status: 'ok', time: new Date().toISOString() });
+});
+
+// Database Connection & Pooler Diagnostics
+app.get('/api/db/diagnostics', (req, res) => {
+  res.json({
+    status: 'ok',
+    diagnostics: db.getDiagnostics(),
+    timestamp: new Date().toISOString()
+  });
 });
 
 // Supabase Connection Status
@@ -44,7 +61,8 @@ app.get('/api/supabase/status', async (req, res) => {
   res.json({
     status: db.isSupabaseConfigured ? 'connected' : 'unconfigured',
     isConfigured: db.isSupabaseConfigured,
-    supabaseUrl: process.env.SUPABASE_URL || null
+    supabaseUrl: process.env.SUPABASE_URL || null,
+    diagnostics: db.getDiagnostics()
   });
 });
 

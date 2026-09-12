@@ -1,0 +1,111 @@
+<%- include('partials/header', { title: 'Job Posted & Matched Workers', activePage: 'employer' }) %>
+
+<div class="container" style="margin-top: 2rem;">
+  <!-- Job Posted Confirmation Card -->
+  <div class="card" style="border-left: 4px solid var(--success-emerald); background: #f0fdf4;">
+    <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 1rem;">
+      <div>
+        <div style="display: flex; align-items: center; gap: 0.5rem;">
+          <span style="background: var(--success-emerald); color: white; border-radius: 50%; width: 24px; height: 24px; display: inline-flex; align-items: center; justify-content: center; font-size: 0.8rem; font-weight: 800;">✓</span>
+          <h1 style="font-size: 1.4rem; color: #065f46; margin: 0;">Job Successfully Posted!</h1>
+        </div>
+        <p style="color: #047857; margin-top: 0.25rem; font-size: 0.95rem;">
+          Requirement for <strong><%= job.skill_needed %></strong> in <strong><%= job.location %></strong> at <strong><%= job.wage_offered %></strong> (<%= job.date_needed %>) is now active.
+        </p>
+      </div>
+
+      <div style="display: flex; gap: 0.5rem;">
+        <a href="/employer/dashboard?phone=<%= encodeURIComponent(job.employer_phone) %>" class="btn btn-sm btn-outline" id="btn-view-employer-dashboard">
+          Go to Your Dashboard →
+        </a>
+        <a href="/employer/post-job" class="btn btn-sm btn-outline">
+          + Post Another Job
+        </a>
+      </div>
+    </div>
+  </div>
+
+  <!-- Instant Worker Matches Section -->
+  <div class="card" style="margin-top: 1.5rem;">
+    <div class="card-header">
+      <div>
+        <h2 class="card-title">
+          🎯 Matching Available Workers (<%= matchedWorkers.length %> Found)
+        </h2>
+        <p style="font-size: 0.9rem; color: var(--text-muted); margin-top: 0.2rem;">
+          Workers in <strong><%= job.location %></strong> with <strong><%= job.skill_needed %></strong> skill marked available today. You can contact them directly right now!
+        </p>
+      </div>
+      <span class="badge badge-available">Live Local Pool</span>
+    </div>
+
+    <% if (matchedWorkers && matchedWorkers.length > 0) { %>
+      <div class="match-grid">
+        <% matchedWorkers.forEach(worker => { %>
+          <div class="worker-card" id="worker-card-<%= worker.id %>">
+            <div>
+              <div class="card-top">
+                <span class="badge badge-skill"><%= worker.skill_type %></span>
+                <span class="badge badge-available">● Available Today</span>
+              </div>
+              <div class="card-person-name" style="margin-top: 0.75rem;"><%= worker.name %></div>
+              <div class="card-meta">
+                <span class="badge badge-location">📍 <%= worker.location %></span>
+                <span class="badge badge-open">Registered <%= new Date(worker.registered_at).toLocaleDateString() %></span>
+              </div>
+            </div>
+
+            <div style="margin-top: 1rem;">
+              <div class="contact-box">
+                <span>📞 Phone:</span>
+                <strong style="color: #0f172a;"><%= worker.phone_number %></strong>
+              </div>
+              <a href="tel:<%= worker.phone_number %>" class="btn btn-success btn-block btn-sm" style="margin-top: 0.75rem;">
+                📞 Call Worker Directly
+              </a>
+            </div>
+          </div>
+        <% }) %>
+      </div>
+    <% } else { %>
+      <div style="text-align: center; padding: 2.5rem 1rem; color: var(--text-muted); background: #f8fafc; border-radius: var(--radius-md);">
+        <div style="font-size: 2rem; margin-bottom: 0.5rem;">🔍</div>
+        <h3 style="font-size: 1.15rem; color: #334155;">No workers currently available in <%= job.location %> for <%= job.skill_needed %></h3>
+        <p style="font-size: 0.9rem; max-width: 500px; margin: 0.5rem auto 1rem;">
+          Your job is active on the platform. As soon as workers open their dashboard, they will see this posting and mark themselves interested!
+        </p>
+        <a href="/employer/dashboard?phone=<%= encodeURIComponent(job.employer_phone) %>" class="btn btn-outline btn-sm">
+          Check Employer Dashboard For Interested Workers
+        </a>
+      </div>
+    <% } %>
+
+    <!-- Other citywide workers preview if direct match is small -->
+    <% if (nearbyWorkers && nearbyWorkers.length > 0) { %>
+      <div style="margin-top: 2rem; padding-top: 1.5rem; border-top: 1px dashed var(--border-subtle);">
+        <h3 style="font-size: 1.05rem; margin-bottom: 0.75rem; color: #475569;">
+          📍 Other <%= job.skill_needed %> Workers in Nearby Neighborhoods:
+        </h3>
+        <div class="match-grid">
+          <% nearbyWorkers.forEach(worker => { %>
+            <div class="worker-card" style="opacity: 0.9;">
+              <div>
+                <div class="card-top">
+                  <span class="badge badge-skill"><%= worker.skill_type %></span>
+                  <span class="badge badge-location">📍 <%= worker.location %></span>
+                </div>
+                <div class="card-person-name" style="margin-top: 0.5rem;"><%= worker.name %></div>
+              </div>
+              <div class="contact-box" style="margin-top: 0.75rem;">
+                <span>📞 <%= worker.phone_number %></span>
+                <a href="tel:<%= worker.phone_number %>" class="btn btn-sm btn-outline">Call</a>
+              </div>
+            </div>
+          <% }) %>
+        </div>
+      </div>
+    <% } %>
+  </div>
+</div>
+
+<%- include('partials/footer') %>

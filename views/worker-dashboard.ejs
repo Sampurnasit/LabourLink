@@ -1,0 +1,207 @@
+<%- include('partials/header', { title: 'Worker Dashboard', activePage: 'worker' }) %>
+
+<div class="container" style="margin-top: 2rem;">
+  <!-- Phone Lookup Bar -->
+  <div class="phone-bar">
+    <div>
+      <div style="font-weight: 700; font-size: 1.1rem; color: #1e293b;">Worker Portal</div>
+      <div style="font-size: 0.85rem; color: var(--text-muted);">Enter your phone number to access your gigs and matched jobs</div>
+    </div>
+
+    <form action="/worker/dashboard" method="GET" class="phone-bar-form">
+      <input type="tel" name="phone" value="<%= phone || '' %>" placeholder="Enter your 10-digit phone" class="form-control" pattern="[0-9]{10}" required id="worker-phone-input">
+      <button type="submit" class="btn btn-worker" id="btn-worker-login" style="white-space: nowrap;">View Dashboard</button>
+    </form>
+  </div>
+
+  <% if (!worker) { %>
+    <!-- Not logged in / Phone not registered view -->
+    <div class="card" style="text-align: center; padding: 3rem 1.5rem;">
+      <div style="font-size: 3rem; margin-bottom: 1rem;">👷‍♂️</div>
+      <% if (phone) { %>
+        <h2 style="font-size: 1.35rem; margin-bottom: 0.5rem;">No worker profile found for phone <code><%= phone %></code></h2>
+        <p style="color: var(--text-muted); max-width: 480px; margin: 0 auto 1.5rem;">
+          You haven't registered this number yet. Register your skill and location in 30 seconds to start getting matched with employers.
+        </p>
+        <a href="/worker/register" class="btn btn-worker btn-lg">Register as Worker Now →</a>
+      <% } else { %>
+        <h2 style="font-size: 1.35rem; margin-bottom: 0.5rem;">Welcome to the Worker Dashboard</h2>
+        <p style="color: var(--text-muted); max-width: 480px; margin: 0 auto 1.5rem;">
+          Please enter your registered phone number above to check your matched jobs, or create a new profile.
+        </p>
+        <div style="display: flex; justify-content: center; gap: 1rem; flex-wrap: wrap;">
+          <a href="/worker/register" class="btn btn-worker">Register as New Worker</a>
+          <a href="/worker/dashboard?phone=9876500001" class="btn btn-outline">Demo Worker (Ramesh - 9876500001)</a>
+        </div>
+      <% } %>
+    </div>
+  <% } else { %>
+    <!-- Worker Profile Overview Card -->
+    <div class="card" style="border-top: 4px solid #0284c7;">
+      <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 1rem;">
+        <div>
+          <div style="display: flex; align-items: center; gap: 0.5rem;">
+            <h1 style="font-size: 1.5rem; margin: 0;"><%= worker.name %></h1>
+            <span class="badge <%= worker.available ? 'badge-available' : 'badge-unavailable' %>">
+              <%= worker.available ? '● Available Today' : '○ Unavailable Today' %>
+            </span>
+          </div>
+          <div class="card-meta" style="margin-top: 0.4rem;">
+            <span class="badge badge-skill">🛠 <%= worker.skill_type %></span>
+            <span class="badge badge-location">📍 <%= worker.location %></span>
+            <span class="badge badge-wage">📞 <%= worker.phone_number %></span>
+          </div>
+        </div>
+
+        <!-- Availability Toggle Form -->
+        <div>
+          <form action="/worker/toggle-availability" method="POST" style="display: flex; align-items: center; gap: 0.75rem;">
+            <input type="hidden" name="phone" value="<%= worker.phone_number %>">
+            <input type="hidden" name="available" value="<%= worker.available ? '0' : '1' %>">
+            <button type="submit" class="btn btn-sm <%= worker.available ? 'btn-outline' : 'btn-success' %>" id="btn-toggle-availability">
+              <%= worker.available ? 'Mark Unavailable Today' : 'Mark Available Today ✓' %>
+            </button>
+          </form>
+        </div>
+      </div>
+    </div>
+
+    <!-- Section 1: Confirmed Jobs (Celebration Card) -->
+    <% const confirmedJobs = appliedJobs.filter(j => j.interest_status === 'confirmed'); %>
+    <% if (confirmedJobs.length > 0) { %>
+      <div class="card" style="border-left: 5px solid var(--success-emerald); background: #f0fdf4;">
+        <h2 style="font-size: 1.25rem; color: #065f46; display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.75rem;">
+          🎉 You Are Confirmed for <%= confirmedJobs.length %> Job!
+        </h2>
+        <div class="match-grid">
+          <% confirmedJobs.forEach(job => { %>
+            <div class="job-item-card" style="background: white; border-color: #86efac;">
+              <div>
+                <div class="card-top">
+                  <span class="badge badge-confirmed">Confirmed Hiring ✓</span>
+                  <span class="badge badge-wage"><%= job.wage_offered %></span>
+                </div>
+                <div class="card-person-name" style="margin-top: 0.5rem;"><%= job.employer_name %></div>
+                <div class="card-meta">
+                  <span class="badge badge-location">📍 <%= job.location %></span>
+                  <span class="badge badge-open">📅 <%= job.date_needed %></span>
+                </div>
+              </div>
+              <div class="contact-box" style="margin-top: 0.75rem; background: #ecfdf5; border-color: #10b981;">
+                <span>Call Employer:</span>
+                <strong style="color: #065f46;"><%= job.employer_phone %></strong>
+                <a href="tel:<%= job.employer_phone %>" class="btn btn-sm btn-success">Call</a>
+              </div>
+            </div>
+          <% }) %>
+        </div>
+      </div>
+    <% } %>
+
+    <!-- Section 2: Matched Open Jobs in your area -->
+    <div class="card">
+      <div class="card-header">
+        <div>
+          <h2 class="card-title">🎯 Matched Jobs in <%= worker.location %> (<%= matchedJobs.length %> Available)</h2>
+          <p style="font-size: 0.85rem; color: var(--text-muted); margin-top: 0.2rem;">
+            Open gigs matching your skill (<strong><%= worker.skill_type %></strong>) and neighborhood.
+          </p>
+        </div>
+      </div>
+
+      <% if (matchedJobs && matchedJobs.length > 0) { %>
+        <div class="match-grid">
+          <% matchedJobs.forEach(job => { %>
+            <% const isInterested = interestedJobIds.includes(job.id); %>
+            <div class="job-item-card" id="job-card-<%= job.id %>">
+              <div>
+                <div class="card-top">
+                  <span class="badge badge-skill"><%= job.skill_needed %></span>
+                  <span class="badge badge-wage"><%= job.wage_offered %></span>
+                </div>
+                <div class="card-person-name" style="margin-top: 0.6rem;"><%= job.employer_name %></div>
+                <div class="card-meta">
+                  <span class="badge badge-location">📍 <%= job.location %></span>
+                  <span class="badge badge-open">📅 <%= job.date_needed %></span>
+                </div>
+              </div>
+
+              <div style="margin-top: 1rem;">
+                <% if (isInterested) { %>
+                  <button class="btn btn-block btn-outline btn-sm" disabled style="background: #e2e8f0; color: #475569; cursor: default;">
+                    ✓ Interested (Waiting for Employer)
+                  </button>
+                <% } else { %>
+                  <form action="/worker/interest" method="POST">
+                    <input type="hidden" name="worker_id" value="<%= worker.id %>">
+                    <input type="hidden" name="job_id" value="<%= job.id %>">
+                    <input type="hidden" name="phone" value="<%= worker.phone_number %>">
+                    <button type="submit" class="btn btn-worker btn-block btn-sm" id="btn-interest-<%= job.id %>">
+                      ✋ I'm Interested
+                    </button>
+                  </form>
+                <% } %>
+              </div>
+            </div>
+          <% }) %>
+        </div>
+      <% } else { %>
+        <div style="text-align: center; padding: 2rem; color: var(--text-muted); background: #f8fafc; border-radius: var(--radius-md);">
+          <div style="font-size: 1.75rem; margin-bottom: 0.35rem;">☕</div>
+          <strong>No new open jobs in <%= worker.location %> for <%= worker.skill_type %> right now.</strong>
+          <p style="font-size: 0.85rem; margin-top: 0.25rem;">Check back shortly or browse citywide jobs below!</p>
+        </div>
+      <% } %>
+    </div>
+
+    <!-- Section 3: Other Citywide Open Jobs in your skill -->
+    <% if (otherSkillJobs && otherSkillJobs.length > 0) { %>
+      <div class="card">
+        <div class="card-header">
+          <div>
+            <h2 class="card-title">🌐 Other Open <%= worker.skill_type %> Jobs Across the City</h2>
+            <p style="font-size: 0.85rem; color: var(--text-muted); margin-top: 0.2rem;">If you are willing to travel to nearby neighborhoods</p>
+          </div>
+        </div>
+
+        <div class="match-grid">
+          <% otherSkillJobs.forEach(job => { %>
+            <% const isInterested = interestedJobIds.includes(job.id); %>
+            <div class="job-item-card">
+              <div>
+                <div class="card-top">
+                  <span class="badge badge-skill"><%= job.skill_needed %></span>
+                  <span class="badge badge-wage"><%= job.wage_offered %></span>
+                </div>
+                <div class="card-person-name" style="margin-top: 0.6rem;"><%= job.employer_name %></div>
+                <div class="card-meta">
+                  <span class="badge badge-location">📍 <%= job.location %></span>
+                  <span class="badge badge-open">📅 <%= job.date_needed %></span>
+                </div>
+              </div>
+
+              <div style="margin-top: 1rem;">
+                <% if (isInterested) { %>
+                  <button class="btn btn-block btn-outline btn-sm" disabled style="background: #e2e8f0; color: #475569;">
+                    ✓ Interested
+                  </button>
+                <% } else { %>
+                  <form action="/worker/interest" method="POST">
+                    <input type="hidden" name="worker_id" value="<%= worker.id %>">
+                    <input type="hidden" name="job_id" value="<%= job.id %>">
+                    <input type="hidden" name="phone" value="<%= worker.phone_number %>">
+                    <button type="submit" class="btn btn-worker btn-block btn-sm">
+                      ✋ I'm Interested
+                    </button>
+                  </form>
+                <% } %>
+              </div>
+            </div>
+          <% }) %>
+        </div>
+      </div>
+    <% } %>
+  <% } %>
+</div>
+
+<%- include('partials/footer') %>

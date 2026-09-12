@@ -1,0 +1,83 @@
+<%- include('partials/header', { title: 'Post a Job', activePage: 'employer' }) %>
+
+<div class="container">
+  <div class="form-card">
+    <div style="text-align: center; margin-bottom: 2rem;">
+      <span class="badge badge-wage" style="font-size: 0.85rem; padding: 0.35rem 0.8rem;">Employer Request</span>
+      <h1 style="font-size: 1.85rem; margin-top: 0.6rem;">Post a 1-Day Job Requirement</h1>
+      <p style="color: var(--text-muted); font-size: 0.95rem; margin-top: 0.3rem;">
+        Find available daily workers instantly in your local neighborhood.
+      </p>
+    </div>
+
+    <form action="/employer/post-job" method="POST" id="employer-post-job-form">
+      <div class="form-group">
+        <label class="form-label" for="employer-name">Your Name / Organization Name *</label>
+        <input type="text" id="employer-name" name="employer_name" class="form-control" placeholder="e.g. Anand Buildcon or Rahul Sharma" required>
+      </div>
+
+      <div class="form-group">
+        <label class="form-label" for="employer-phone">Employer Phone Number *</label>
+        <input type="tel" id="employer-phone" name="employer_phone" class="form-control" placeholder="10-digit phone number (e.g. 9900112233)" pattern="[0-9]{10}" required>
+        <small class="form-hint">Workers will use this number to contact you once matched.</small>
+      </div>
+
+      <div class="form-group">
+        <label class="form-label" for="skill-needed">Skill Needed *</label>
+        <select id="skill-needed" name="skill_needed" class="form-control" required>
+          <option value="" disabled selected>Select skill required...</option>
+          <option value="Construction">Construction (Masonry, Helper, Cement work)</option>
+          <option value="Painting">Painting (Wall paint, Primer, Texture)</option>
+          <option value="Plumbing">Plumbing (Fitting, Pipe repair, Sanitation)</option>
+          <option value="Loading">Loading (Luggage, Goods loading/unloading, Shifting)</option>
+          <option value="Domestic Help">Domestic Help (Cleaning, Helper, Cooking)</option>
+          <option value="Other">Other / General Labor</option>
+        </select>
+      </div>
+
+      <div class="form-group">
+        <label class="form-label" for="job-location">Job Location / Area *</label>
+        <select id="job-location" name="location" class="form-control" required>
+          <option value="" disabled selected>Select job area...</option>
+          <option value="Koramangala">Koramangala</option>
+          <option value="Indiranagar">Indiranagar</option>
+          <option value="Whitefield">Whitefield</option>
+          <option value="HSR Layout">HSR Layout</option>
+          <option value="Marathahalli">Marathahalli</option>
+          <option value="Jayanagar">Jayanagar</option>
+          <option value="BTM Layout">BTM Layout</option>
+          <option value="Electronic City">Electronic City</option>
+          <option value="Other Area">Other / Flexible</option>
+        </select>
+      </div>
+
+      <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem;">
+        <div class="form-group">
+          <label class="form-label" for="wage-offered">Daily Wage Offered *</label>
+          <input type="text" id="wage-offered" name="wage_offered" class="form-control" placeholder="e.g. ₹850/day" required>
+        </div>
+
+        <div class="form-group">
+          <label class="form-label" for="date-needed">Date Needed *</label>
+          <select id="date-needed" name="date_needed" class="form-control" required>
+            <option value="Today" selected>Today</option>
+            <option value="Tomorrow">Tomorrow</option>
+            <option value="This Weekend">This Weekend</option>
+            <option value="Flexible">Flexible Date</option>
+          </select>
+        </div>
+      </div>
+
+      <button type="submit" class="btn btn-employer btn-block btn-lg" id="btn-submit-post-job" style="margin-top: 1rem;">
+        Post Job & Find Available Workers →
+      </button>
+
+      <div style="text-align: center; margin-top: 1.5rem; font-size: 0.9rem; color: var(--text-muted);">
+        Already posted jobs?
+        <a href="/employer/dashboard" style="font-weight: 600; margin-left: 0.25rem;">Go to Employer Dashboard</a>
+      </div>
+    </form>
+  </div>
+</div>
+
+<%- include('partials/footer') %>

@@ -1,0 +1,142 @@
+<%- include('partials/header', { title: 'Employer Dashboard', activePage: 'employer' }) %>
+
+<div class="container" style="margin-top: 2rem;">
+  <!-- Employer Phone Lookup Bar -->
+  <div class="phone-bar">
+    <div>
+      <div style="font-weight: 700; font-size: 1.1rem; color: #1e293b;">Employer Portal</div>
+      <div style="font-size: 0.85rem; color: var(--text-muted);">Enter your phone number to manage your posted jobs and confirmed workers</div>
+    </div>
+
+    <form action="/employer/dashboard" method="GET" class="phone-bar-form">
+      <input type="tel" name="phone" value="<%= phone || '' %>" placeholder="Employer phone (e.g. 9900112233)" class="form-control" pattern="[0-9]{10}" required id="employer-phone-input">
+      <button type="submit" class="btn btn-employer" id="btn-employer-login" style="white-space: nowrap;">View Dashboard</button>
+    </form>
+  </div>
+
+  <% if (!jobs || jobs.length === 0) { %>
+    <div class="card" style="text-align: center; padding: 3rem 1.5rem;">
+      <div style="font-size: 3rem; margin-bottom: 1rem;">🏢</div>
+      <% if (phone) { %>
+        <h2 style="font-size: 1.35rem; margin-bottom: 0.5rem;">No jobs found for phone <code><%= phone %></code></h2>
+        <p style="color: var(--text-muted); max-width: 480px; margin: 0 auto 1.5rem;">
+          You haven't posted any jobs with this phone number yet. Post a job now to match with verified daily workers.
+        </p>
+        <a href="/employer/post-job" class="btn btn-employer btn-lg">+ Post a 1-Day Job Now</a>
+      <% } else { %>
+        <h2 style="font-size: 1.35rem; margin-bottom: 0.5rem;">Welcome to the Employer Dashboard</h2>
+        <p style="color: var(--text-muted); max-width: 480px; margin: 0 auto 1.5rem;">
+          Enter your registered employer phone number above to see your active job posts and candidate applications.
+        </p>
+        <div style="display: flex; justify-content: center; gap: 1rem; flex-wrap: wrap;">
+          <a href="/employer/post-job" class="btn btn-employer">+ Post a New Job</a>
+          <a href="/employer/dashboard?phone=9900112233" class="btn btn-outline">Demo Employer (Anand Buildcon - 9900112233)</a>
+        </div>
+      <% } %>
+    </div>
+  <% } else { %>
+    <!-- Employer Overview Banner -->
+    <div class="card" style="border-top: 4px solid var(--accent-amber);">
+      <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 1rem;">
+        <div>
+          <h1 style="font-size: 1.4rem; margin: 0;"><%= jobs[0].employer_name %></h1>
+          <div style="color: var(--text-muted); font-size: 0.9rem; margin-top: 0.25rem;">
+            Employer Phone: <strong><%= phone %></strong> • <%= jobs.length %> Total Job Posts
+          </div>
+        </div>
+        <div>
+          <a href="/employer/post-job" class="btn btn-employer btn-sm" id="btn-employer-post-another">+ Post Another Job</a>
+        </div>
+      </div>
+    </div>
+
+    <!-- Jobs List -->
+    <h2 style="font-size: 1.25rem; margin-bottom: 1rem;">Your Posted Jobs & Interested Workers</h2>
+
+    <% jobs.forEach(job => { %>
+      <div class="card" id="employer-job-card-<%= job.id %>" style="margin-bottom: 1.5rem;">
+        <div class="card-header" style="flex-wrap: wrap; gap: 0.75rem;">
+          <div>
+            <div style="display: flex; align-items: center; gap: 0.5rem;">
+              <h3 style="font-size: 1.2rem; margin: 0;"><%= job.skill_needed %> Worker Needed</h3>
+              <span class="badge <%= job.status === 'open' ? 'badge-open' : 'badge-filled' %>" id="status-badge-<%= job.id %>">
+                <%= job.status === 'open' ? '● OPEN FOR WORKERS' : '✓ FILLED & CONFIRMED' %>
+              </span>
+            </div>
+            <div class="card-meta" style="margin-top: 0.4rem;">
+              <span class="badge badge-location">📍 <%= job.location %></span>
+              <span class="badge badge-wage">💰 <%= job.wage_offered %></span>
+              <span class="badge badge-open">📅 <%= job.date_needed %></span>
+              <span class="badge" style="background: #f1f5f9; color: #64748b;">Posted <%= new Date(job.created_at).toLocaleDateString() %></span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Interested Workers for this Job -->
+        <div style="margin-top: 1rem;">
+          <h4 style="font-size: 0.95rem; color: #475569; margin-bottom: 0.75rem;">
+            👷‍♂️ Workers Expressing Interest (<%= job.interestedWorkers ? job.interestedWorkers.length : 0 %>)
+          </h4>
+
+          <% if (job.interestedWorkers && job.interestedWorkers.length > 0) { %>
+            <div class="match-grid">
+              <% job.interestedWorkers.forEach(worker => { %>
+                <div class="worker-card" style="<%= worker.status === 'confirmed' ? 'border-color: #10b981; background: #f0fdf4;' : '' %>" id="worker-interest-<%= worker.worker_id %>">
+                  <div>
+                    <div class="card-top">
+                      <span class="badge badge-skill"><%= worker.skill_type %></span>
+                      <% if (worker.status === 'confirmed') { %>
+                        <span class="badge badge-available">🎉 CONFIRMED WORKER</span>
+                      <% } else { %>
+                        <span class="badge badge-wage">Applied / Interested</span>
+                      <% } %>
+                    </div>
+                    <div class="card-person-name" style="margin-top: 0.5rem;"><%= worker.name %></div>
+                    <div class="card-meta">
+                      <span class="badge badge-location">📍 <%= worker.location %></span>
+                      <span class="badge <%= worker.available ? 'badge-available' : 'badge-unavailable' %>">
+                        <%= worker.available ? 'Available' : 'Currently Busy' %>
+                      </span>
+                    </div>
+                  </div>
+
+                  <div style="margin-top: 0.75rem;">
+                    <div class="contact-box">
+                      <span>📞 Contact:</span>
+                      <strong><%= worker.phone_number %></strong>
+                      <a href="tel:<%= worker.phone_number %>" class="btn btn-sm btn-outline">Call</a>
+                    </div>
+
+                    <% if (job.status === 'open' && worker.status !== 'confirmed') { %>
+                      <form action="/employer/confirm-worker" method="POST" style="margin-top: 0.75rem;">
+                        <input type="hidden" name="job_id" value="<%= job.id %>">
+                        <input type="hidden" name="worker_id" value="<%= worker.worker_id %>">
+                        <input type="hidden" name="employer_phone" value="<%= phone %>">
+                        <button type="submit" class="btn btn-success btn-block btn-sm" id="btn-confirm-worker-<%= worker.worker_id %>">
+                          ✓ Confirm This Worker for Job
+                        </button>
+                      </form>
+                    <% } else if (worker.status === 'confirmed') { %>
+                      <div style="text-align: center; font-size: 0.85rem; color: #047857; font-weight: 700; margin-top: 0.5rem;">
+                        ✓ Worker Confirmed & Job Marked Filled!
+                      </div>
+                    <% } %>
+                  </div>
+                </div>
+              <% }) %>
+            </div>
+          <% } else { %>
+            <div style="background: #f8fafc; padding: 1.25rem; border-radius: var(--radius-md); font-size: 0.9rem; color: var(--text-muted);">
+              No worker has clicked "I'm Interested" yet for this specific post.
+              <a href="/employer/post-success/<%= job.id %>" style="font-weight: 600; margin-left: 0.35rem;">
+                View instant local matches & call directly →
+              </a>
+            </div>
+          <% } %>
+        </div>
+      </div>
+    <% }) %>
+  <% } %>
+</div>
+
+<%- include('partials/footer') %>

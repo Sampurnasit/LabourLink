@@ -1,0 +1,77 @@
+<%- include('partials/header', { title: 'Worker Registration', activePage: 'worker' }) %>
+
+<div class="container">
+  <div class="form-card">
+    <div style="text-align: center; margin-bottom: 2rem;">
+      <span class="badge badge-skill" style="font-size: 0.85rem; padding: 0.35rem 0.8rem;">Worker Onboarding</span>
+      <h1 style="font-size: 1.85rem; margin-top: 0.6rem;">Register as a Daily Worker</h1>
+      <p style="color: var(--text-muted); font-size: 0.95rem; margin-top: 0.3rem;">
+        Get matched with local employers hiring in your area today.
+      </p>
+    </div>
+
+    <form action="/worker/register" method="POST" id="worker-register-form">
+      <div class="form-group">
+        <label class="form-label" for="worker-name">Full Name *</label>
+        <input type="text" id="worker-name" name="name" class="form-control" placeholder="e.g. Ramesh Kumar" required>
+      </div>
+
+      <div class="form-group">
+        <label class="form-label" for="worker-phone">Phone Number *</label>
+        <input type="tel" id="worker-phone" name="phone_number" class="form-control" placeholder="10-digit mobile number (e.g. 9876543210)" pattern="[0-9]{10}" required>
+        <small class="form-hint">Used as your identifier to see matched jobs and receive calls from employers.</small>
+      </div>
+
+      <div class="form-group">
+        <label class="form-label" for="worker-skill">Primary Skill Type *</label>
+        <select id="worker-skill" name="skill_type" class="form-control" required>
+          <option value="" disabled selected>Select your skill...</option>
+          <option value="Construction">Construction (Masonry, Helper, Cement work)</option>
+          <option value="Painting">Painting (Wall paint, Primer, Texture)</option>
+          <option value="Plumbing">Plumbing (Fitting, Pipe repair, Sanitation)</option>
+          <option value="Loading">Loading (Luggage, Goods loading/unloading, Shifting)</option>
+          <option value="Domestic Help">Domestic Help (Cleaning, Helper, Cooking)</option>
+          <option value="Other">Other / General Daily Labor</option>
+        </select>
+      </div>
+
+      <div class="form-group">
+        <label class="form-label" for="worker-location">Your Location / Neighborhood *</label>
+        <select id="worker-location" name="location" class="form-control" required>
+          <option value="" disabled selected>Select your area...</option>
+          <option value="Koramangala">Koramangala</option>
+          <option value="Indiranagar">Indiranagar</option>
+          <option value="Whitefield">Whitefield</option>
+          <option value="HSR Layout">HSR Layout</option>
+          <option value="Marathahalli">Marathahalli</option>
+          <option value="Jayanagar">Jayanagar</option>
+          <option value="BTM Layout">BTM Layout</option>
+          <option value="Electronic City">Electronic City</option>
+          <option value="Other Area">Other / Flexible Citywide</option>
+        </select>
+      </div>
+
+      <div class="toggle-wrapper">
+        <div>
+          <strong style="font-size: 0.95rem; color: #1e293b;">Available for Work Today?</strong>
+          <div style="font-size: 0.8rem; color: var(--text-muted);">Turn off if you already have a gig or taking rest.</div>
+        </div>
+        <label class="switch">
+          <input type="checkbox" name="available" id="worker-available-toggle" value="1" checked>
+          <span class="slider"></span>
+        </label>
+      </div>
+
+      <button type="submit" class="btn btn-worker btn-block btn-lg" id="btn-submit-worker-reg" style="margin-top: 1rem;">
+        Complete Registration →
+      </button>
+
+      <div style="text-align: center; margin-top: 1.5rem; font-size: 0.9rem; color: var(--text-muted);">
+        Already registered?
+        <a href="/worker/dashboard" style="font-weight: 600; margin-left: 0.25rem;">Go to Worker Dashboard</a>
+      </div>
+    </form>
+  </div>
+</div>
+
+<%- include('partials/footer') %>

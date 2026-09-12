@@ -1,0 +1,120 @@
+<%- include('partials/header', { title: 'Home', activePage: 'home' }) %>
+
+<section class="hero-section">
+  <div class="container hero-content">
+    <div class="hero-pill">
+      <span>⚡ Direct One-Day Labor Matching</span>
+    </div>
+    <h1 class="hero-title">
+      Connecting Daily-Wage Workers With Local Employers. <span class="hero-highlight">Instantly.</span>
+    </h1>
+    <p class="hero-subtitle">
+      No middleman cuts, no waiting at physical crossroads. Post a 1-day job or register your skills to match directly on the digital labor chowk.
+    </p>
+  </div>
+</section>
+
+<div class="container">
+  <!-- Dual Action Cards -->
+  <div class="dual-action-grid">
+    <!-- Card 1: Worker -->
+    <div class="action-card" id="card-worker">
+      <div>
+        <div class="card-icon-wrapper worker-icon-bg">👷‍♂️</div>
+        <h2 class="action-card-title">I'm Looking for Work</h2>
+        <p class="action-card-desc">
+          Register your skill (Construction, Painting, Plumbing, Loading, Domestic Help), indicate if you're available today, and receive instant matched job offers near you.
+        </p>
+      </div>
+      <div class="action-card-footer">
+        <a href="/worker/register" class="btn btn-worker btn-block" id="btn-home-worker-reg">
+          <span>Register as a Worker</span> →
+        </a>
+        <a href="/worker/dashboard" class="btn btn-outline btn-block" id="btn-home-worker-dash">
+          Open Worker Dashboard
+        </a>
+      </div>
+    </div>
+
+    <!-- Card 2: Employer -->
+    <div class="action-card" id="card-employer">
+      <div>
+        <div class="card-icon-wrapper employer-icon-bg">🏢</div>
+        <h2 class="action-card-title">I Need to Hire Someone</h2>
+        <p class="action-card-desc">
+          Need short-term help today or tomorrow? Post your requirement with your wage offer and location. Instantly see available workers and contact them directly.
+        </p>
+      </div>
+      <div class="action-card-footer">
+        <a href="/employer/post-job" class="btn btn-employer btn-block" id="btn-home-employer-post">
+          <span>Post a 1-Day Job</span> →
+        </a>
+        <a href="/employer/dashboard" class="btn btn-outline btn-block" id="btn-home-employer-dash">
+          Open Employer Dashboard
+        </a>
+      </div>
+    </div>
+  </div>
+
+  <!-- Live Stats -->
+  <section class="stats-section">
+    <div class="stats-grid">
+      <div class="stat-box">
+        <div class="stat-number" id="stat-workers"><%= stats.totalWorkers || 0 %></div>
+        <div class="stat-label">Registered Workers</div>
+      </div>
+      <div class="stat-box">
+        <div class="stat-number" style="color: var(--success-emerald);" id="stat-available"><%= stats.availableWorkers || 0 %></div>
+        <div class="stat-label">Available Today</div>
+      </div>
+      <div class="stat-box">
+        <div class="stat-number" style="color: var(--primary);" id="stat-open-jobs"><%= stats.openJobs || 0 %></div>
+        <div class="stat-label">Active Open Jobs</div>
+      </div>
+      <div class="stat-box">
+        <div class="stat-number" style="color: var(--accent-amber);" id="stat-interests"><%= stats.totalInterests || 0 %></div>
+        <div class="stat-label">Matches & Interests</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Recent Open Jobs Preview -->
+  <div class="card" style="margin-top: 1.5rem;">
+    <div class="card-header">
+      <div>
+        <h2 class="card-title">🔥 Recent Open Opportunities</h2>
+        <p style="font-size: 0.85rem; color: var(--text-muted); margin-top: 0.2rem;">Direct matching gigs open for immediate work</p>
+      </div>
+      <a href="/jobs" class="btn btn-sm btn-outline" id="link-view-all-jobs">View All Jobs (<%= stats.openJobs %>) →</a>
+    </div>
+
+    <% if (recentJobs && recentJobs.length > 0) { %>
+      <div class="match-grid">
+        <% recentJobs.forEach(job => { %>
+          <div class="job-item-card">
+            <div>
+              <div class="card-top">
+                <span class="badge badge-skill"><%= job.skill_needed %></span>
+                <span class="badge badge-wage"><%= job.wage_offered %></span>
+              </div>
+              <div class="card-person-name" style="margin-top: 0.65rem;"><%= job.employer_name %></div>
+              <div class="card-meta">
+                <span class="badge badge-location">📍 <%= job.location %></span>
+                <span class="badge badge-open">📅 <%= job.date_needed %></span>
+              </div>
+            </div>
+            <div style="margin-top: 0.75rem;">
+              <a href="/worker/dashboard" class="btn btn-sm btn-outline btn-block">Apply on Worker Portal</a>
+            </div>
+          </div>
+        <% }) %>
+      </div>
+    <% } else { %>
+      <div style="text-align: center; padding: 2rem; color: var(--text-muted);">
+        No open jobs right now. Be the first to <a href="/employer/post-job">post a job</a>!
+      </div>
+    <% } %>
+  </div>
+</div>
+
+<%- include('partials/footer') %>

@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title><%= typeof title !== 'undefined' ? title + ' | LabourLink' : 'LabourLink — Digital Labor Chowk' %></title>
+  <meta name="description" content="Connecting daily-wage workers directly with local employers for short-term and single-day labor. Fast, transparent, and direct.">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+  <header class="navbar">
+    <div class="container navbar-inner">
+      <a href="/" class="brand-logo" id="nav-brand-logo">
+        <span class="brand-icon">⚡</span>
+        <span>LabourLink</span>
+        <span class="brand-badge">Labor Chowk</span>
+      </a>
+
+      <nav>
+        <ul class="nav-links">
+          <li><a href="/" class="nav-link <%= typeof activePage !== 'undefined' && activePage === 'home' ? 'active' : '' %>" id="nav-home">Home</a></li>
+          <li><a href="/jobs" class="nav-link <%= typeof activePage !== 'undefined' && activePage === 'jobs' ? 'active' : '' %>" id="nav-public-jobs">Public Job Board</a></li>
+          <li><a href="/worker/dashboard" class="nav-link <%= typeof activePage !== 'undefined' && activePage === 'worker' ? 'active' : '' %>" id="nav-worker-dash">Worker Portal</a></li>
+          <li><a href="/employer/dashboard" class="nav-link <%= typeof activePage !== 'undefined' && activePage === 'employer' ? 'active' : '' %>" id="nav-employer-dash">Employer Portal</a></li>
+          <li><a href="/app/" class="nav-link" style="color: #0284c7; font-weight: 700;" id="nav-flutter-app">📱 Flutter App</a></li>
+          <li><a href="/employer/post-job" class="btn btn-sm btn-primary nav-cta" id="nav-post-job-cta">+ Post a Job</a></li>
+        </ul>
+      </nav>
+    </div>
+  </header>
+
+  <main class="main-content">
+    <% if (typeof successMessage !== 'undefined' && successMessage) { %>
+      <div class="container" style="margin-top: 1.5rem;">
+        <div class="alert alert-success">
+          <span>✓</span>
+          <div><%= successMessage %></div>
+        </div>
+      </div>
+    <% } %>
+    <% if (typeof errorMessage !== 'undefined' && errorMessage) { %>
+      <div class="container" style="margin-top: 1.5rem;">
+        <div class="alert alert-danger">
+          <span>⚠</span>
+          <div><%= errorMessage %></div>
+        </div>
+      </div>
+    <% } %>

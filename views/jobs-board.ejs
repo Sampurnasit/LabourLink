@@ -1,0 +1,95 @@
+<%- include('partials/header', { title: 'Digital Labor Chowk — Public Job Board', activePage: 'jobs' }) %>
+
+<div class="container" style="margin-top: 2rem;">
+  <div class="card" style="background: linear-gradient(135deg, #1e293b 0%, #334155 100%); color: white; border: none;">
+    <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 1rem;">
+      <div>
+        <span class="badge badge-wage" style="background: #f59e0b; color: #78350f;">Public Board</span>
+        <h1 style="font-size: 1.8rem; color: white; margin-top: 0.5rem;">Digital Labor Chowk</h1>
+        <p style="color: #cbd5e1; font-size: 0.95rem; margin-top: 0.25rem;">
+          Real-time stream of single-day & short-term labor openings across all neighborhoods.
+        </p>
+      </div>
+
+      <div style="display: flex; gap: 0.75rem;">
+        <a href="/worker/register" class="btn btn-worker">Register to Apply</a>
+        <a href="/employer/post-job" class="btn btn-employer">+ Post a Job</a>
+      </div>
+    </div>
+  </div>
+
+  <!-- Filters -->
+  <div class="card" style="padding: 1.25rem;">
+    <form action="/jobs" method="GET" style="display: flex; gap: 1rem; flex-wrap: wrap; align-items: center;">
+      <div style="flex: 1; min-width: 180px;">
+        <label class="form-label" style="font-size: 0.8rem; margin-bottom: 0.2rem;">Filter by Skill</label>
+        <select name="skill" class="form-control" onchange="this.form.submit()">
+          <option value="">All Skills</option>
+          <option value="Construction" <%= selectedSkill === 'Construction' ? 'selected' : '' %>>Construction</option>
+          <option value="Painting" <%= selectedSkill === 'Painting' ? 'selected' : '' %>>Painting</option>
+          <option value="Plumbing" <%= selectedSkill === 'Plumbing' ? 'selected' : '' %>>Plumbing</option>
+          <option value="Loading" <%= selectedSkill === 'Loading' ? 'selected' : '' %>>Loading</option>
+          <option value="Domestic Help" <%= selectedSkill === 'Domestic Help' ? 'selected' : '' %>>Domestic Help</option>
+          <option value="Other" <%= selectedSkill === 'Other' ? 'selected' : '' %>>Other</option>
+        </select>
+      </div>
+
+      <div style="flex: 1; min-width: 180px;">
+        <label class="form-label" style="font-size: 0.8rem; margin-bottom: 0.2rem;">Filter by Area</label>
+        <select name="location" class="form-control" onchange="this.form.submit()">
+          <option value="">All Neighborhoods</option>
+          <option value="Koramangala" <%= selectedLocation === 'Koramangala' ? 'selected' : '' %>>Koramangala</option>
+          <option value="Indiranagar" <%= selectedLocation === 'Indiranagar' ? 'selected' : '' %>>Indiranagar</option>
+          <option value="Whitefield" <%= selectedLocation === 'Whitefield' ? 'selected' : '' %>>Whitefield</option>
+          <option value="HSR Layout" <%= selectedLocation === 'HSR Layout' ? 'selected' : '' %>>HSR Layout</option>
+          <option value="Marathahalli" <%= selectedLocation === 'Marathahalli' ? 'selected' : '' %>>Marathahalli</option>
+          <option value="Jayanagar" <%= selectedLocation === 'Jayanagar' ? 'selected' : '' %>>Jayanagar</option>
+        </select>
+      </div>
+
+      <div style="margin-top: 1.25rem;">
+        <a href="/jobs" class="btn btn-outline btn-sm">Clear Filters</a>
+      </div>
+    </form>
+  </div>
+
+  <!-- Job Feed -->
+  <div class="card">
+    <div class="card-header">
+      <h2 class="card-title">Open Jobs (<%= jobs.length %>)</h2>
+      <span class="badge badge-open">Live Feed</span>
+    </div>
+
+    <% if (jobs && jobs.length > 0) { %>
+      <div class="match-grid">
+        <% jobs.forEach(job => { %>
+          <div class="job-item-card">
+            <div>
+              <div class="card-top">
+                <span class="badge badge-skill"><%= job.skill_needed %></span>
+                <span class="badge badge-wage"><%= job.wage_offered %></span>
+              </div>
+              <div class="card-person-name" style="margin-top: 0.6rem;"><%= job.employer_name %></div>
+              <div class="card-meta">
+                <span class="badge badge-location">📍 <%= job.location %></span>
+                <span class="badge badge-open">📅 <%= job.date_needed %></span>
+              </div>
+            </div>
+
+            <div style="margin-top: 0.75rem;">
+              <a href="/worker/dashboard" class="btn btn-worker btn-block btn-sm">
+                Apply on Worker Portal →
+              </a>
+            </div>
+          </div>
+        <% }) %>
+      </div>
+    <% } else { %>
+      <div style="text-align: center; padding: 3rem; color: var(--text-muted);">
+        No jobs found matching your filters.
+      </div>
+    <% } %>
+  </div>
+</div>
+
+<%- include('partials/footer') %>

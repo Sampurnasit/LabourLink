@@ -219,6 +219,8 @@ class _EmployerMatchesScreenState extends State<EmployerMatchesScreen> {
   }
 
   Widget _buildWorkerCard(Worker worker, {bool isNearby = false}) {
+    final isBusy = worker.isHiredByOther || worker.status == 'HIRED' || !worker.available;
+
     return Card(
       margin: const EdgeInsets.only(bottom: 12),
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
@@ -230,11 +232,13 @@ class _EmployerMatchesScreenState extends State<EmployerMatchesScreen> {
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
-                Text(
-                  worker.name,
-                  style: const TextStyle(
-                    fontSize: 16,
-                    fontWeight: FontWeight.w800,
+                Expanded(
+                  child: Text(
+                    worker.name,
+                    style: const TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.w800,
+                    ),
                   ),
                 ),
                 Container(
@@ -243,14 +247,17 @@ class _EmployerMatchesScreenState extends State<EmployerMatchesScreen> {
                     vertical: 3,
                   ),
                   decoration: BoxDecoration(
-                    color: const Color(0xFFDCFCE7),
+                    color: isBusy ? const Color(0xFFFEF3C7) : const Color(0xFFDCFCE7),
                     borderRadius: BorderRadius.circular(6),
+                    border: Border.all(
+                      color: isBusy ? const Color(0xFFFCD34D) : const Color(0xFF86EFAC),
+                    ),
                   ),
-                  child: const Text(
-                    '● Available',
+                  child: Text(
+                    isBusy ? '● Hired by other' : '● Available',
                     style: TextStyle(
-                      color: Color(0xFF15803D),
-                      fontWeight: FontWeight.w700,
+                      color: isBusy ? const Color(0xFF92400E) : const Color(0xFF15803D),
+                      fontWeight: FontWeight.w800,
                       fontSize: 11,
                     ),
                   ),
@@ -262,6 +269,14 @@ class _EmployerMatchesScreenState extends State<EmployerMatchesScreen> {
               '🛠 ${worker.skillType}  •  📍 ${worker.location}',
               style: TextStyle(fontSize: 13, color: Colors.grey.shade700),
             ),
+            if (isBusy && worker.currentLocationZone != null)
+              Padding(
+                padding: const EdgeInsets.only(top: 4),
+                child: Text(
+                  '🏢 Active on job in: ${worker.currentLocationZone}',
+                  style: const TextStyle(fontSize: 11, color: Color(0xFFB45309), fontWeight: FontWeight.w600),
+                ),
+              ),
             const SizedBox(height: 12),
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
@@ -280,31 +295,58 @@ class _EmployerMatchesScreenState extends State<EmployerMatchesScreen> {
                       fontSize: 14,
                     ),
                   ),
-                  Container(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 10,
-                      vertical: 4,
-                    ),
-                    decoration: BoxDecoration(
-                      color: const Color(0xFF10B981),
-                      borderRadius: BorderRadius.circular(8),
-                    ),
-                    child: const Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Icon(Icons.call, color: Colors.white, size: 14),
-                        SizedBox(width: 4),
-                        Text(
-                          'Call Worker',
-                          style: TextStyle(
-                            color: Colors.white,
-                            fontSize: 12,
-                            fontWeight: FontWeight.w700,
+                  if (isBusy)
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 10,
+                        vertical: 5,
+                      ),
+                      decoration: BoxDecoration(
+                        color: Colors.grey.shade200,
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: const Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(Icons.lock_outline, color: Colors.grey, size: 14),
+                          SizedBox(width: 4),
+                          Text(
+                            'Busy on Job',
+                            style: TextStyle(
+                              color: Colors.black54,
+                              fontSize: 12,
+                              fontWeight: FontWeight.w700,
+                            ),
                           ),
-                        ),
-                      ],
+                        ],
+                      ),
+                    )
+                  else
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 10,
+                        vertical: 4,
+                      ),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFF10B981),
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: const Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(Icons.call, color: Colors.white, size: 14),
+                          SizedBox(width: 4),
+                          Text(
+                            'Call Worker',
+                            style: TextStyle(
+                              color: Colors.white,
+                              fontSize: 12,
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                        ],
+                      ),
                     ),
-                  ),
                 ],
               ),
             ),

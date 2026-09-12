@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
@@ -6,7 +7,16 @@ import '../models/worker.dart';
 import '../models/job.dart';
 
 class ApiService {
-  // Configurable base URL
+  static const Duration requestTimeout = Duration(seconds: 4);
+
+  // Candidate URLs for auto-discovery
+  static List<String> get candidateUrls => [
+    'http://127.0.0.1:3000',
+    'http://localhost:3000',
+    'http://10.0.2.2:3000',
+    'http://192.168.0.161:3000',
+  ];
+
   static String get defaultBaseUrl {
     if (kIsWeb) {
       return 'http://localhost:3000';
@@ -37,25 +47,25 @@ class ApiService {
       }
     } catch (_) {}
 
-    // Priority candidates
-    final candidates = [
-      'http://127.0.0.1:3000',
-      'http://localhost:3000',
-    ];
+    // Auto-discover working endpoint
+    await autoDiscoverServer();
+  }
 
-    for (final candidate in candidates) {
+  static Future<bool> autoDiscoverServer() async {
+    for (final candidate in candidateUrls) {
       final reachable = await testConnection(candidate);
       if (reachable) {
         baseUrl = candidate;
         try {
           final prefs = await SharedPreferences.getInstance();
-          await prefs.setString('api_base_url', candidate);
+          await prefs.setString('api_base_url', baseUrl);
         } catch (_) {}
-        return;
+        debugPrint('[ApiService] Connected to backend at: $baseUrl');
+        return true;
       }
     }
-
     baseUrl = defaultBaseUrl;
+    return false;
   }
 
   static Future<void> setBaseUrl(String newUrl) async {
@@ -342,6 +352,28 @@ class ApiService {
       return res != null && res.statusCode == 200;
     } catch (e) {
       debugPrint('Error confirming worker: $e');
+      return false;
+    }
+  }
+
+  // 11. Complete a Job (Frees up labourer)
+  static Future<bool> completeJob(int jobId) async {
+    try {
+      final res = await _safePost('/api/jobs/$jobId/complete', {});
+      return res != null && res.statusCode == 200;
+    } catch (e) {
+      debugPrint('Error completing job: $e');
+      return false;
+    }
+  }
+
+  // 12. Cancel a Job (Frees up labourer)
+  static Future<bool> cancelJob(int jobId) async {
+    try {
+      final res = await _safePost('/api/jobs/$jobId/cancel', {});
+      return res != null && res.statusCode == 200;
+    } catch (e) {
+      debugPrint('Error cancelling job: $e');
       return false;
     }
   }

@@ -109,6 +109,46 @@ class _EmployerDashboardScreenState extends State<EmployerDashboardScreen> {
     }
   }
 
+  Future<void> _completeJob(Job job) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Complete Job'),
+        content: const Text(
+          'Mark this job as completed?\n\nThis will free up the hired labourer so they become available for new jobs.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            style: FilledButton.styleFrom(
+              backgroundColor: const Color(0xFF10B981),
+            ),
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Mark Completed'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed == true) {
+      final success = await ApiService.completeJob(job.id);
+      if (success && mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text(
+              '✓ Job completed! Hired labourer released to available pool.',
+            ),
+            backgroundColor: Color(0xFF10B981),
+          ),
+        );
+        _loadJobs();
+      }
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -303,15 +343,23 @@ class _EmployerDashboardScreenState extends State<EmployerDashboardScreen> {
                   decoration: BoxDecoration(
                     color: isOpen
                         ? const Color(0xFFDCFCE7)
-                        : const Color(0xFFE2E8F0),
+                        : (job.status == 'completed'
+                            ? const Color(0xFFE0E7FF)
+                            : const Color(0xFFE2E8F0)),
                     borderRadius: BorderRadius.circular(6),
                   ),
                   child: Text(
-                    isOpen ? '● OPEN' : '✓ FILLED',
+                    isOpen
+                        ? '● OPEN'
+                        : (job.status == 'completed'
+                            ? '✓ COMPLETED'
+                            : '✓ FILLED & ACTIVE'),
                     style: TextStyle(
                       color: isOpen
                           ? const Color(0xFF15803D)
-                          : const Color(0xFF475569),
+                          : (job.status == 'completed'
+                              ? const Color(0xFF4338CA)
+                              : const Color(0xFF475569)),
                       fontWeight: FontWeight.w800,
                       fontSize: 11,
                     ),
@@ -324,6 +372,22 @@ class _EmployerDashboardScreenState extends State<EmployerDashboardScreen> {
               '📍 ${job.location}  •  💰 ${job.wageOffered}  •  📅 ${job.dateNeeded}',
               style: TextStyle(fontSize: 13, color: Colors.grey.shade700),
             ),
+            if (job.status == 'filled' || job.status == 'IN_PROGRESS') ...[
+              const SizedBox(height: 10),
+              OutlinedButton.icon(
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: const Color(0xFF047857),
+                  side: const BorderSide(color: Color(0xFF10B981)),
+                  visualDensity: VisualDensity.compact,
+                ),
+                icon: const Icon(Icons.check_circle_outline, size: 16),
+                label: const Text(
+                  'Mark Completed & Free Labourer',
+                  style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700),
+                ),
+                onPressed: () => _completeJob(job),
+              ),
+            ],
             const Divider(height: 20),
 
             // Interested Workers

@@ -55,12 +55,20 @@
 
     <% jobs.forEach(job => { %>
       <div class="card" id="employer-job-card-<%= job.id %>" style="margin-bottom: 1.5rem;">
-        <div class="card-header" style="flex-wrap: wrap; gap: 0.75rem;">
+        <div class="card-header" style="flex-wrap: wrap; gap: 0.75rem; justify-content: space-between;">
           <div>
-            <div style="display: flex; align-items: center; gap: 0.5rem;">
+            <div style="display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap;">
               <h3 style="font-size: 1.2rem; margin: 0;"><%= job.skill_needed %> Worker Needed</h3>
-              <span class="badge <%= job.status === 'open' ? 'badge-open' : 'badge-filled' %>" id="status-badge-<%= job.id %>">
-                <%= job.status === 'open' ? '● OPEN FOR WORKERS' : '✓ FILLED & CONFIRMED' %>
+              <span class="badge <%= job.status === 'open' ? 'badge-open' : (job.status === 'completed' ? 'badge-available' : (job.status === 'cancelled' ? 'badge-unavailable' : 'badge-filled')) %>" id="status-badge-<%= job.id %>">
+                <% if (job.status === 'open') { %>
+                  ● OPEN FOR WORKERS
+                <% } else if (job.status === 'completed') { %>
+                  ✓ COMPLETED (Worker Released)
+                <% } else if (job.status === 'cancelled') { %>
+                  ✕ CANCELLED
+                <% } else { %>
+                  ✓ FILLED & IN PROGRESS
+                <% } %>
               </span>
             </div>
             <div class="card-meta" style="margin-top: 0.4rem;">
@@ -70,6 +78,23 @@
               <span class="badge" style="background: #f1f5f9; color: #64748b;">Posted <%= new Date(job.created_at).toLocaleDateString() %></span>
             </div>
           </div>
+
+          <% if (job.status === 'filled' || job.status === 'IN_PROGRESS') { %>
+            <div style="display: flex; gap: 0.5rem; align-items: center;">
+              <form action="/employer/jobs/<%= job.id %>/complete" method="POST" style="margin: 0;">
+                <input type="hidden" name="employer_phone" value="<%= phone %>">
+                <button type="submit" class="btn btn-sm btn-success" title="Marks job completed and releases labourer back to available pool">
+                  ✓ Complete & Release Worker
+                </button>
+              </form>
+              <form action="/employer/jobs/<%= job.id %>/cancel" method="POST" style="margin: 0;">
+                <input type="hidden" name="employer_phone" value="<%= phone %>">
+                <button type="submit" class="btn btn-sm btn-outline" style="color: #ef4444; border-color: #fca5a5;" onclick="return confirm('Cancel this job? Worker will be freed.')">
+                  Cancel Job
+                </button>
+              </form>
+            </div>
+          <% } %>
         </div>
 
         <!-- Interested Workers for this Job -->

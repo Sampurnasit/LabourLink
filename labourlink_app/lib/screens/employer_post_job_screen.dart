@@ -131,7 +131,7 @@ class _EmployerPostJobScreenState extends State<EmployerPostJobScreen> {
         content: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            const Text('Enter your Node server address (e.g., http://localhost:3000 or http://192.168.0.196:3000):', style: TextStyle(fontSize: 12)),
+            const Text('Enter your Node server address (e.g., http://localhost:3000 or http://192.168.0.161:3000):', style: TextStyle(fontSize: 12)),
             const SizedBox(height: 10),
             TextField(
               controller: controller,

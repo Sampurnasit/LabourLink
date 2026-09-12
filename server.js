@@ -25,11 +25,65 @@ app.use('/app', express.static(flutterBuildDir));
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
+// Request logging
+app.use((req, res, next) => {
+  if (req.path.startsWith('/api')) {
+    console.log(`[API ${req.method}] ${req.path} from ${req.ip}`);
+  }
+  next();
+});
+
+// Health check endpoint
+app.get('/api/health', (req, res) => {
+  res.json({ status: 'ok', time: new Date().toISOString() });
+});
+
 // Helper to sanitize phone input (extracts last 10 digits e.g. for Indian numbers with +91 or leading 0)
 function cleanPhone(phone) {
   if (!phone) return '';
   const digits = String(phone).replace(/[^0-9]/g, '');
   return digits.length > 10 ? digits.slice(-10) : digits;
+}
+
+// Helper to check worker active job conflict & cross-zone restrictions
+async function checkWorkerActiveConflict(workerId, targetJobId) {
+  try {
+    const { data: worker } = await supabase
+      .from('workers')
+      .select('*')
+      .eq('id', workerId)
+      .maybeSingle();
+
+    if (!worker) {
+      return { hasConflict: false, notFound: true };
+    }
+
+    // A worker is actively hired if available is 0/false or status is HIRED
+    const isActivelyEmployed = worker.available === 0 || worker.available === false || worker.status === 'HIRED';
+
+    if (isActivelyEmployed) {
+      let targetJob = null;
+      if (targetJobId) {
+        const { data: tj } = await supabase.from('jobs').select('*').eq('id', targetJobId).maybeSingle();
+        targetJob = tj;
+      }
+      const activeZone = worker.current_location_zone || worker.location;
+      const isDifferentArea = targetJob && activeZone && targetJob.location !== activeZone;
+
+      return {
+        hasConflict: true,
+        worker,
+        message: isDifferentArea
+          ? `You are currently assigned to an active job in another area (${activeZone}).`
+          : 'You are currently assigned to an active job and cannot apply for or accept new jobs.'
+      };
+    }
+
+    return { hasConflict: false, worker };
+  } catch (err) {
+    console.error('Error checking active conflict:', err);
+    return { hasConflict: false };
+  }
 }
 
 // ==========================================================================
@@ -123,7 +177,7 @@ app.post('/api/jobs', async (req, res) => {
   }
 });
 
-// 4. Get Single Job and Instant Matching Workers
+// 4. Get Single Job and Instant Matching Workers (Explorer View with Hired-by-Other indicator)
 app.get('/api/jobs/:id/matches', async (req, res) => {
   try {
     const { data: job, error: jobError } = await supabase
@@ -137,32 +191,47 @@ app.get('/api/jobs/:id/matches', async (req, res) => {
       return res.status(404).json({ error: 'Job not found' });
     }
 
-    // Direct matches: same skill + same location + available = 1
-    const { data: matchedWorkers, error: matchErr } = await supabase
+    // Direct matches: same skill + same location
+    const { data: matchedRaw, error: matchErr } = await supabase
       .from('workers')
       .select('*')
       .eq('skill_type', job.skill_needed)
       .eq('location', job.location)
-      .eq('available', 1)
       .order('id', { ascending: false });
     if (matchErr) throw matchErr;
 
     // Nearby citywide workers with same skill
-    const { data: nearbyWorkers, error: nearErr } = await supabase
+    const { data: nearbyRaw, error: nearErr } = await supabase
       .from('workers')
       .select('*')
       .eq('skill_type', job.skill_needed)
       .neq('location', job.location)
-      .eq('available', 1)
       .order('id', { ascending: false })
       .limit(5);
     if (nearErr) throw nearErr;
 
+    const mapWorker = (w) => {
+      const isHired = w.status === 'HIRED' || w.available === 0 || w.available === false;
+      return {
+        ...w,
+        is_hired_by_other: isHired ? 1 : 0,
+        active_zone: w.current_location_zone || w.location,
+        status: isHired ? 'HIRED' : 'AVAILABLE'
+      };
+    };
+
+    const matchedWorkers = (matchedRaw || []).map(mapWorker);
+    const nearbyWorkers = (nearbyRaw || []).map(mapWorker);
+
+    // Sort available workers first, followed by workers hired by others
+    matchedWorkers.sort((a, b) => a.is_hired_by_other - b.is_hired_by_other);
+    nearbyWorkers.sort((a, b) => a.is_hired_by_other - b.is_hired_by_other);
+
     res.json({
       status: 'ok',
       job,
-      matchedWorkers: matchedWorkers || [],
-      nearbyWorkers: nearbyWorkers || []
+      matchedWorkers,
+      nearbyWorkers
     });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -272,6 +341,14 @@ app.post('/api/workers/interest', async (req, res) => {
       return res.status(400).json({ error: 'worker_id and job_id are required' });
     }
 
+    const conflict = await checkWorkerActiveConflict(worker_id, job_id);
+    if (conflict.notFound) {
+      return res.status(404).json({ error: 'Worker not found' });
+    }
+    if (conflict.hasConflict) {
+      return res.status(409).json({ error: conflict.message });
+    }
+
     const { error } = await supabase
       .from('job_interests')
       .upsert(
@@ -353,12 +430,22 @@ app.get('/api/employers/:phone/jobs', async (req, res) => {
   }
 });
 
-// 10. Employer Confirm Worker
+// 10. Employer Confirm Worker (Locks worker to active job)
 app.post('/api/employers/confirm-worker', async (req, res) => {
   try {
     const { job_id, worker_id } = req.body;
     if (!job_id || !worker_id) {
       return res.status(400).json({ error: 'job_id and worker_id are required' });
+    }
+
+    const { data: job } = await supabase.from('jobs').select('*').eq('id', job_id).maybeSingle();
+    if (!job) {
+      return res.status(404).json({ error: 'Job not found' });
+    }
+
+    const conflict = await checkWorkerActiveConflict(worker_id, job_id);
+    if (conflict.hasConflict) {
+      return res.status(409).json({ error: 'This worker is currently assigned to an active job.' });
     }
 
     const { error: iErr } = await supabase
@@ -374,7 +461,76 @@ app.post('/api/employers/confirm-worker', async (req, res) => {
       .eq('id', job_id);
     if (jErr) throw jErr;
 
-    res.json({ status: 'ok', message: 'Worker confirmed and job marked filled' });
+    // Set worker available = 0 (hired)
+    await supabase
+      .from('workers')
+      .update({ available: 0 })
+      .eq('id', worker_id);
+
+    res.json({ status: 'ok', message: 'Worker confirmed and assigned to active job' });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// 11. Complete Job (releases labourer back to available pool)
+app.post('/api/jobs/:id/complete', async (req, res) => {
+  try {
+    const jobId = req.params.id;
+    const { data: job } = await supabase.from('jobs').select('*').eq('id', jobId).maybeSingle();
+    if (!job) {
+      return res.status(404).json({ error: 'Job not found' });
+    }
+
+    await supabase.from('jobs').update({ status: 'completed' }).eq('id', jobId);
+
+    // Find confirmed worker(s) and release them
+    const { data: confirmedInterests } = await supabase
+      .from('job_interests')
+      .select('worker_id')
+      .eq('job_id', jobId)
+      .eq('status', 'confirmed');
+
+    if (confirmedInterests && confirmedInterests.length > 0) {
+      const workerIds = confirmedInterests.map((ci) => ci.worker_id);
+      await supabase
+        .from('workers')
+        .update({ available: 1 })
+        .in('id', workerIds);
+    }
+
+    res.json({ status: 'ok', message: 'Job completed and labourer is now available' });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// 12. Cancel Job (releases labourer back to available pool)
+app.post('/api/jobs/:id/cancel', async (req, res) => {
+  try {
+    const jobId = req.params.id;
+    const { data: job } = await supabase.from('jobs').select('*').eq('id', jobId).maybeSingle();
+    if (!job) {
+      return res.status(404).json({ error: 'Job not found' });
+    }
+
+    await supabase.from('jobs').update({ status: 'cancelled' }).eq('id', jobId);
+
+    const { data: confirmedInterests } = await supabase
+      .from('job_interests')
+      .select('worker_id')
+      .eq('job_id', jobId)
+      .eq('status', 'confirmed');
+
+    if (confirmedInterests && confirmedInterests.length > 0) {
+      const workerIds = confirmedInterests.map((ci) => ci.worker_id);
+      await supabase
+        .from('workers')
+        .update({ available: 1 })
+        .in('id', workerIds);
+    }
+
+    res.json({ status: 'ok', message: 'Job cancelled and labourer is now available' });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -461,6 +617,7 @@ app.get('/worker/dashboard', async (req, res) => {
   try {
     const phone = cleanPhone(req.query.phone);
     let successMessage = null;
+    let errorMessage = req.query.error || null;
 
     if (req.query.registered) {
       successMessage = 'Welcome to LabourLink! Your profile is registered and ready for matching.';
@@ -478,7 +635,8 @@ app.get('/worker/dashboard', async (req, res) => {
         otherSkillJobs: [],
         appliedJobs: [],
         interestedJobIds: [],
-        successMessage
+        successMessage,
+        errorMessage
       });
     }
 
@@ -498,7 +656,8 @@ app.get('/worker/dashboard', async (req, res) => {
         otherSkillJobs: [],
         appliedJobs: [],
         interestedJobIds: [],
-        successMessage
+        successMessage,
+        errorMessage
       });
     }
 
@@ -540,7 +699,8 @@ app.get('/worker/dashboard', async (req, res) => {
       otherSkillJobs: otherSkillJobs || [],
       appliedJobs,
       interestedJobIds,
-      successMessage
+      successMessage,
+      errorMessage
     });
   } catch (err) {
     console.error('Error rendering worker dashboard:', err);
@@ -554,6 +714,11 @@ app.post('/worker/interest', async (req, res) => {
     const { worker_id, job_id, phone } = req.body;
     if (!worker_id || !job_id) {
       return res.status(400).redirect('/worker/dashboard');
+    }
+
+    const conflict = await checkWorkerActiveConflict(worker_id, job_id);
+    if (conflict.hasConflict) {
+      return res.redirect(`/worker/dashboard?phone=${encodeURIComponent(phone || '')}&error=${encodeURIComponent(conflict.message)}`);
     }
 
     await supabase
@@ -644,27 +809,41 @@ app.get('/employer/post-success/:id', async (req, res) => {
       return res.status(404).send('Job not found');
     }
 
-    const { data: matchedWorkers } = await supabase
+    const { data: matchedRaw } = await supabase
       .from('workers')
       .select('*')
       .eq('skill_type', job.skill_needed)
       .eq('location', job.location)
-      .eq('available', 1)
       .order('id', { ascending: false });
 
-    const { data: nearbyWorkers } = await supabase
+    const { data: nearbyRaw } = await supabase
       .from('workers')
       .select('*')
       .eq('skill_type', job.skill_needed)
       .neq('location', job.location)
-      .eq('available', 1)
       .order('id', { ascending: false })
       .limit(4);
 
+    const mapWorker = (w) => {
+      const isHired = w.status === 'HIRED' || w.available === 0 || w.available === false;
+      return {
+        ...w,
+        is_hired_by_other: isHired ? 1 : 0,
+        active_zone: w.current_location_zone || w.location,
+        status: isHired ? 'HIRED' : 'AVAILABLE'
+      };
+    };
+
+    const matchedWorkers = (matchedRaw || []).map(mapWorker);
+    const nearbyWorkers = (nearbyRaw || []).map(mapWorker);
+
+    matchedWorkers.sort((a, b) => a.is_hired_by_other - b.is_hired_by_other);
+    nearbyWorkers.sort((a, b) => a.is_hired_by_other - b.is_hired_by_other);
+
     res.render('employer-post-success', {
       job,
-      matchedWorkers: matchedWorkers || [],
-      nearbyWorkers: nearbyWorkers || []
+      matchedWorkers,
+      nearbyWorkers
     });
   } catch (err) {
     console.error('Error loading post success:', err);
@@ -677,16 +856,22 @@ app.get('/employer/dashboard', async (req, res) => {
   try {
     const phone = cleanPhone(req.query.phone);
     let successMessage = null;
+    let errorMessage = req.query.error || null;
 
     if (req.query.confirmed) {
       successMessage = 'Worker confirmed successfully! The job has been marked filled.';
+    } else if (req.query.completed) {
+      successMessage = 'Job marked completed and labourer released back to available pool.';
+    } else if (req.query.cancelled) {
+      successMessage = 'Job cancelled and labourer released back to available pool.';
     }
 
     if (!phone) {
       return res.render('employer-dashboard', {
         jobs: [],
         phone: '',
-        successMessage
+        successMessage,
+        errorMessage
       });
     }
 
@@ -730,7 +915,8 @@ app.get('/employer/dashboard', async (req, res) => {
     res.render('employer-dashboard', {
       jobs: jobList,
       phone,
-      successMessage
+      successMessage,
+      errorMessage
     });
   } catch (err) {
     console.error('Error rendering employer dashboard:', err);
@@ -746,6 +932,16 @@ app.post('/employer/confirm-worker', async (req, res) => {
       return res.status(400).redirect('/employer/dashboard');
     }
 
+    const { data: job } = await supabase.from('jobs').select('*').eq('id', job_id).maybeSingle();
+    if (!job) {
+      return res.status(404).send('Job not found');
+    }
+
+    const conflict = await checkWorkerActiveConflict(worker_id, job_id);
+    if (conflict.hasConflict) {
+      return res.redirect(`/employer/dashboard?phone=${encodeURIComponent(employer_phone || '')}&error=${encodeURIComponent(conflict.message)}`);
+    }
+
     await supabase
       .from('job_interests')
       .update({ status: 'confirmed' })
@@ -757,10 +953,70 @@ app.post('/employer/confirm-worker', async (req, res) => {
       .update({ status: 'filled' })
       .eq('id', job_id);
 
+    await supabase
+      .from('workers')
+      .update({ available: 0 })
+      .eq('id', worker_id);
+
     res.redirect(`/employer/dashboard?phone=${encodeURIComponent(employer_phone)}&confirmed=1`);
   } catch (err) {
     console.error('Error confirming worker:', err);
     res.redirect(`/employer/dashboard?phone=${encodeURIComponent(req.body.employer_phone || '')}`);
+  }
+});
+
+// Web routes for complete and cancel job
+app.post('/employer/jobs/:id/complete', async (req, res) => {
+  try {
+    const jobId = req.params.id;
+    const employerPhone = req.body.employer_phone || '';
+    await supabase.from('jobs').update({ status: 'completed' }).eq('id', jobId);
+
+    const { data: confirmedInterests } = await supabase
+      .from('job_interests')
+      .select('worker_id')
+      .eq('job_id', jobId)
+      .eq('status', 'confirmed');
+
+    if (confirmedInterests && confirmedInterests.length > 0) {
+      const workerIds = confirmedInterests.map((ci) => ci.worker_id);
+      await supabase
+        .from('workers')
+        .update({ available: 1 })
+        .in('id', workerIds);
+    }
+
+    res.redirect(`/employer/dashboard?phone=${encodeURIComponent(employerPhone)}&completed=1`);
+  } catch (err) {
+    console.error('Error completing job:', err);
+    res.redirect('/employer/dashboard');
+  }
+});
+
+app.post('/employer/jobs/:id/cancel', async (req, res) => {
+  try {
+    const jobId = req.params.id;
+    const employerPhone = req.body.employer_phone || '';
+    await supabase.from('jobs').update({ status: 'cancelled' }).eq('id', jobId);
+
+    const { data: confirmedInterests } = await supabase
+      .from('job_interests')
+      .select('worker_id')
+      .eq('job_id', jobId)
+      .eq('status', 'confirmed');
+
+    if (confirmedInterests && confirmedInterests.length > 0) {
+      const workerIds = confirmedInterests.map((ci) => ci.worker_id);
+      await supabase
+        .from('workers')
+        .update({ available: 1 })
+        .in('id', workerIds);
+    }
+
+    res.redirect(`/employer/dashboard?phone=${encodeURIComponent(employerPhone)}&cancelled=1`);
+  } catch (err) {
+    console.error('Error cancelling job:', err);
+    res.redirect('/employer/dashboard');
   }
 });
 
@@ -792,8 +1048,8 @@ app.get('/jobs', async (req, res) => {
   }
 });
 
-app.listen(port, () => {
-  console.log(`LabourLink server running at http://localhost:${port}`);
+app.listen(port, '0.0.0.0', () => {
+  console.log(`LabourLink server running at http://0.0.0.0:${port} (Local: http://localhost:${port})`);
 
   // Automatically maintain USB reverse port forwarding for connected Android devices
   try {

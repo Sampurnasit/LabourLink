@@ -19,7 +19,7 @@ async function seed() {
     { name: 'Suresh Patel', phone_number: '9876500002', skill_type: 'Painting', location: 'Indiranagar', available: 1 },
     { name: 'Mohammed Rafiq', phone_number: '9876500003', skill_type: 'Plumbing', location: 'Koramangala', available: 1 },
     { name: 'Anil Yadav', phone_number: '9876500004', skill_type: 'Loading', location: 'Whitefield', available: 1 },
-    { name: 'Sunita Devi', phone_number: '9876500005', skill_type: 'Domestic Help', location: 'HSR Layout', available: 1 },
+    { name: 'Sunita Devi', phone_number: '9876500005', skill_type: 'Domestic Help', location: 'HSR Layout', available: 0 },
     { name: 'Vijay Sharma', phone_number: '9876500006', skill_type: 'Construction', location: 'HSR Layout', available: 1 },
     { name: 'Dinesh Verma', phone_number: '9876500007', skill_type: 'Painting', location: 'Koramangala', available: 1 },
     { name: 'Rajesh Goud', phone_number: '9876500008', skill_type: 'Plumbing', location: 'Indiranagar', available: 1 },
@@ -133,7 +133,7 @@ async function seed() {
       throw new Error(`Failed to seed job interests: ${iErr.message}`);
     }
 
-    console.log('✓ Seeded sample job interests');
+    console.log('✓ Seeded sample job interests and active bookings');
   }
 
   console.log('Supabase database seeding complete!');

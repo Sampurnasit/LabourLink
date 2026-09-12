@@ -10,12 +10,12 @@ import '../models/worker_cv.dart';
 class ApiService {
   static const Duration requestTimeout = Duration(seconds: 4);
 
-  // Candidate URLs for auto-discovery
+  // Candidate URLs for auto-discovery across all platforms & network setups
   static List<String> get candidateUrls => [
     'http://127.0.0.1:3000',
     'http://localhost:3000',
-    'http://10.0.2.2:3000',
     'http://192.168.0.161:3000',
+    'http://10.0.2.2:3000',
   ];
 
   static String get defaultBaseUrl {
@@ -24,7 +24,7 @@ class ApiService {
     }
     switch (defaultTargetPlatform) {
       case TargetPlatform.android:
-        return 'http://192.168.0.148:3000'; // Physical device: use PC's LAN IP
+        return 'http://127.0.0.1:3000'; // Default to 127.0.0.1 (ADB reverse) with fast auto-fallback to Wi-Fi LAN
       default:
         return 'http://127.0.0.1:3000';
     }
@@ -38,18 +38,15 @@ class ApiService {
       final savedUrl = prefs.getString('api_base_url');
       if (savedUrl != null) {
         final clean = savedUrl.trim().replaceAll(RegExp(r'/+$'), '');
-        // Clear dead 10.0.2.2 or empty URLs
-        if (clean.contains('10.0.2.2') || clean.isEmpty) {
-          await prefs.remove('api_base_url');
-        } else {
+        // Clear dead or unverified saved URLs
+        if (clean.isNotEmpty) {
           final ok = await testConnection(clean);
           if (ok) {
             baseUrl = clean;
             return;
-          } else {
-            await prefs.remove('api_base_url');
           }
         }
+        await prefs.remove('api_base_url');
       }
     } catch (_) {}
 
@@ -87,14 +84,14 @@ class ApiService {
   static Future<bool> testConnection([String? candidateUrl]) async {
     try {
       final target = (candidateUrl ?? baseUrl).trim().replaceAll(RegExp(r'/+$'), '');
-      final res = await http.get(Uri.parse('$target/api/stats')).timeout(const Duration(seconds: 4));
+      final res = await http.get(Uri.parse('$target/api/stats')).timeout(const Duration(seconds: 2));
       return res.statusCode == 200;
     } catch (_) {
       return false;
     }
   }
 
-  // Safe HTTP GET with auto-retry and auto-recovery to 127.0.0.1:3000
+  // Safe HTTP GET with auto-retry and auto-recovery across all candidate URLs
   static Future<http.Response?> _safeGet(String path, {Map<String, String>? query}) async {
     Uri buildUri(String base) {
       final clean = base.replaceAll(RegExp(r'/+$'), '');
@@ -106,25 +103,23 @@ class ApiService {
       return uri;
     }
 
-    // Try primary baseUrl with 1 immediate retry on transient socket hiccups
+    // Try primary baseUrl with 1 immediate retry
     for (int attempt = 0; attempt < 2; attempt++) {
       try {
-        return await http.get(buildUri(baseUrl)).timeout(const Duration(seconds: 6));
+        return await http.get(buildUri(baseUrl)).timeout(const Duration(seconds: 4));
       } catch (e) {
         if (attempt == 0) {
-          await Future.delayed(const Duration(milliseconds: 350));
+          await Future.delayed(const Duration(milliseconds: 250));
           continue;
         }
-        debugPrint('GET $path failed on $baseUrl: $e');
       }
     }
 
-    // Fallback candidates if primary candidate failed
-    final fallbackCandidates = ['http://127.0.0.1:3000', 'http://localhost:3000'];
-    for (final fallbackUrl in fallbackCandidates) {
+    // Auto-scan all candidate URLs if primary baseUrl failed
+    for (final fallbackUrl in candidateUrls) {
       if (fallbackUrl == baseUrl) continue;
       try {
-        final fallback = await http.get(buildUri(fallbackUrl)).timeout(const Duration(seconds: 5));
+        final fallback = await http.get(buildUri(fallbackUrl)).timeout(const Duration(seconds: 2));
         if (fallback.statusCode == 200) {
           setBaseUrl(fallbackUrl);
           return fallback;
@@ -134,7 +129,7 @@ class ApiService {
     return null;
   }
 
-  // Safe HTTP POST with auto-retry and auto-recovery to 127.0.0.1:3000
+  // Safe HTTP POST with auto-retry and auto-recovery across all candidate URLs
   static Future<http.Response?> _safePost(String path, Map<String, dynamic> body) async {
     Uri buildUri(String base) {
       final clean = base.replaceAll(RegExp(r'/+$'), '');
@@ -147,25 +142,24 @@ class ApiService {
           buildUri(baseUrl),
           headers: {'Content-Type': 'application/json'},
           body: jsonEncode(body),
-        ).timeout(const Duration(seconds: 6));
+        ).timeout(const Duration(seconds: 4));
       } catch (e) {
         if (attempt == 0) {
-          await Future.delayed(const Duration(milliseconds: 350));
+          await Future.delayed(const Duration(milliseconds: 250));
           continue;
         }
-        debugPrint('POST $path failed on $baseUrl: $e');
       }
     }
 
-    final fallbackCandidates = ['http://127.0.0.1:3000', 'http://localhost:3000'];
-    for (final fallbackUrl in fallbackCandidates) {
+    // Auto-scan all candidate URLs if primary baseUrl failed
+    for (final fallbackUrl in candidateUrls) {
       if (fallbackUrl == baseUrl) continue;
       try {
         final fallback = await http.post(
           buildUri(fallbackUrl),
           headers: {'Content-Type': 'application/json'},
           body: jsonEncode(body),
-        ).timeout(const Duration(seconds: 5));
+        ).timeout(const Duration(seconds: 3));
         if (fallback.statusCode >= 200 && fallback.statusCode < 300) {
           setBaseUrl(fallbackUrl);
           return fallback;

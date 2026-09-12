@@ -86,14 +86,14 @@ class ApiService {
   static Future<bool> testConnection([String? candidateUrl]) async {
     try {
       final target = (candidateUrl ?? baseUrl).trim().replaceAll(RegExp(r'/+$'), '');
-      final res = await http.get(Uri.parse('$target/api/stats')).timeout(const Duration(seconds: 2));
+      final res = await http.get(Uri.parse('$target/api/stats')).timeout(const Duration(seconds: 4));
       return res.statusCode == 200;
     } catch (_) {
       return false;
     }
   }
 
-  // Safe HTTP GET with auto-recovery to 127.0.0.1:3000
+  // Safe HTTP GET with auto-retry and auto-recovery to 127.0.0.1:3000
   static Future<http.Response?> _safeGet(String path, {Map<String, String>? query}) async {
     Uri buildUri(String base) {
       final clean = base.replaceAll(RegExp(r'/+$'), '');
@@ -105,53 +105,73 @@ class ApiService {
       return uri;
     }
 
-    try {
-      return await http.get(buildUri(baseUrl)).timeout(const Duration(seconds: 4));
-    } catch (e) {
-      debugPrint('GET $path failed on $baseUrl: $e');
-      if (baseUrl != 'http://127.0.0.1:3000') {
-        try {
-          final fallback = await http.get(buildUri('http://127.0.0.1:3000')).timeout(const Duration(seconds: 4));
-          if (fallback.statusCode == 200) {
-            setBaseUrl('http://127.0.0.1:3000');
-            return fallback;
-          }
-        } catch (_) {}
+    // Try primary baseUrl with 1 immediate retry on transient socket hiccups
+    for (int attempt = 0; attempt < 2; attempt++) {
+      try {
+        return await http.get(buildUri(baseUrl)).timeout(const Duration(seconds: 6));
+      } catch (e) {
+        if (attempt == 0) {
+          await Future.delayed(const Duration(milliseconds: 350));
+          continue;
+        }
+        debugPrint('GET $path failed on $baseUrl: $e');
       }
-      return null;
     }
+
+    // Fallback candidates if primary candidate failed
+    final fallbackCandidates = ['http://127.0.0.1:3000', 'http://localhost:3000'];
+    for (final fallbackUrl in fallbackCandidates) {
+      if (fallbackUrl == baseUrl) continue;
+      try {
+        final fallback = await http.get(buildUri(fallbackUrl)).timeout(const Duration(seconds: 5));
+        if (fallback.statusCode == 200) {
+          setBaseUrl(fallbackUrl);
+          return fallback;
+        }
+      } catch (_) {}
+    }
+    return null;
   }
 
-  // Safe HTTP POST with auto-recovery to 127.0.0.1:3000
+  // Safe HTTP POST with auto-retry and auto-recovery to 127.0.0.1:3000
   static Future<http.Response?> _safePost(String path, Map<String, dynamic> body) async {
     Uri buildUri(String base) {
       final clean = base.replaceAll(RegExp(r'/+$'), '');
       return Uri.parse('$clean$path');
     }
 
-    try {
-      return await http.post(
-        buildUri(baseUrl),
-        headers: {'Content-Type': 'application/json'},
-        body: jsonEncode(body),
-      ).timeout(const Duration(seconds: 5));
-    } catch (e) {
-      debugPrint('POST $path failed on $baseUrl: $e');
-      if (baseUrl != 'http://127.0.0.1:3000') {
-        try {
-          final fallback = await http.post(
-            buildUri('http://127.0.0.1:3000'),
-            headers: {'Content-Type': 'application/json'},
-            body: jsonEncode(body),
-          ).timeout(const Duration(seconds: 5));
-          if (fallback.statusCode >= 200 && fallback.statusCode < 300) {
-            setBaseUrl('http://127.0.0.1:3000');
-            return fallback;
-          }
-        } catch (_) {}
+    for (int attempt = 0; attempt < 2; attempt++) {
+      try {
+        return await http.post(
+          buildUri(baseUrl),
+          headers: {'Content-Type': 'application/json'},
+          body: jsonEncode(body),
+        ).timeout(const Duration(seconds: 6));
+      } catch (e) {
+        if (attempt == 0) {
+          await Future.delayed(const Duration(milliseconds: 350));
+          continue;
+        }
+        debugPrint('POST $path failed on $baseUrl: $e');
       }
-      return null;
     }
+
+    final fallbackCandidates = ['http://127.0.0.1:3000', 'http://localhost:3000'];
+    for (final fallbackUrl in fallbackCandidates) {
+      if (fallbackUrl == baseUrl) continue;
+      try {
+        final fallback = await http.post(
+          buildUri(fallbackUrl),
+          headers: {'Content-Type': 'application/json'},
+          body: jsonEncode(body),
+        ).timeout(const Duration(seconds: 5));
+        if (fallback.statusCode >= 200 && fallback.statusCode < 300) {
+          setBaseUrl(fallbackUrl);
+          return fallback;
+        }
+      } catch (_) {}
+    }
+    return null;
   }
 
   // 1. Platform Statistics

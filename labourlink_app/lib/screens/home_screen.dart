@@ -40,9 +40,15 @@ class _HomeScreenState extends State<HomeScreen> {
 
     if (mounted) {
       setState(() {
-        _stats = statsMap;
-        _recentJobs = jobsList;
-        _isServerConnected = statsMap.isNotEmpty;
+        if (statsMap.isNotEmpty) {
+          _stats = statsMap;
+          _isServerConnected = true;
+        } else if (_stats.isEmpty) {
+          _isServerConnected = false;
+        }
+        if (jobsList.isNotEmpty) {
+          _recentJobs = jobsList;
+        }
         _isLoading = false;
       });
     }

@@ -1196,14 +1196,29 @@ app.listen(port, '0.0.0.0', () => {
     const defaultAdb = path.join(process.env.LOCALAPPDATA || '', 'Android', 'Sdk', 'platform-tools', 'adb.exe');
     const adbPath = fs.existsSync(defaultAdb) ? defaultAdb : 'adb';
 
+    let isChecking = false;
+
     function maintainAdbReverse() {
-      execFile(adbPath, ['reverse', `tcp:${port}`, `tcp:${port}`], () => {
-        // Silently succeed when device is connected, ignore if no device
+      if (isChecking) return;
+      isChecking = true;
+
+      // Check if reverse forward is already established
+      execFile(adbPath, ['reverse', '--list'], (listErr, stdout) => {
+        if (!listErr && stdout && stdout.includes(`tcp:${port}`)) {
+          // Port is ALREADY active. Do NOT re-run adb reverse to avoid dropping in-flight requests!
+          isChecking = false;
+          return;
+        }
+
+        // Only run adb reverse if not already forwarded (e.g. freshly connected phone)
+        execFile(adbPath, ['reverse', `tcp:${port}`, `tcp:${port}`], () => {
+          isChecking = false;
+        });
       });
     }
 
     maintainAdbReverse();
-    setInterval(maintainAdbReverse, 3000);
+    setInterval(maintainAdbReverse, 4000);
     console.log(`Auto ADB reverse watcher active for Android devices on port ${port}`);
   } catch (e) {
     // Non-fatal if child_process/adb is unavailable

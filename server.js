@@ -2347,7 +2347,9 @@ app.listen(port, '0.0.0.0', async () => {
 
   // Auto-start ngrok tunnel when NGROK_AUTHTOKEN is configured
   try {
-    await ngrokTunnel.startTunnel();
+    if (ngrokTunnel && typeof ngrokTunnel.startTunnel === 'function') {
+      await ngrokTunnel.startTunnel();
+    }
   } catch (ngrokErr) {
     console.warn('⚠️  [ngrok] Auto-tunnel failed (non-fatal):', ngrokErr.message);
   }

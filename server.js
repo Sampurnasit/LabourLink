@@ -9,7 +9,7 @@ const adminIvrRoutes = require('./routes/adminIvr');
 const ivrService = require('./services/ivrService');
 const voiceAgent = require('./voice-agent');
 const voiceTools = require('./voice-tools');
-const ngrokTunnel = require('./ngrok-tunnel');
+let ngrokTunnel; try { ngrokTunnel = require('./ngrok-tunnel'); } catch (_) { ngrokTunnel = null; }
 
 const app = express();
 const port = process.env.PORT || 3000;

@@ -711,25 +711,26 @@ class _MockPhoneCallWidgetState extends State<MockPhoneCallWidget>
   }
 
   Widget _buildPhoneCallCard() {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     Color cardBorder;
     Color cardBg;
 
     switch (_callState) {
       case CallState.idle:
-        cardBorder = const Color(0xFFE2E8F0);
-        cardBg = Colors.white;
+        cardBorder = isDark ? const Color(0xFF2E3D52) : const Color(0xFFE2E8F0);
+        cardBg = isDark ? const Color(0xFF182234) : Colors.white;
         break;
       case CallState.ringing:
         cardBorder = const Color(0xFFF59E0B);
-        cardBg = const Color(0xFFFFFBEB);
+        cardBg = isDark ? const Color(0xFF2A1C08) : const Color(0xFFFFFBEB);
         break;
       case CallState.connected:
         cardBorder = const Color(0xFF10B981);
-        cardBg = const Color(0xFFF0FDF4);
+        cardBg = isDark ? const Color(0xFF063327) : const Color(0xFFF0FDF4);
         break;
       case CallState.ended:
-        cardBorder = const Color(0xFFCBD5E1);
-        cardBg = const Color(0xFFF8FAFC);
+        cardBorder = isDark ? const Color(0xFF2E3D52) : const Color(0xFFCBD5E1);
+        cardBg = isDark ? const Color(0xFF182234) : const Color(0xFFF8FAFC);
         break;
     }
 
@@ -837,12 +838,14 @@ class _MockPhoneCallWidgetState extends State<MockPhoneCallWidget>
         break;
     }
 
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: isDark ? const Color(0xFF1E293B) : Colors.white,
         borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: const Color(0xFFE2E8F0)),
+        border: Border.all(color: isDark ? const Color(0xFF334155) : const Color(0xFFE2E8F0)),
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
@@ -871,10 +874,10 @@ class _MockPhoneCallWidgetState extends State<MockPhoneCallWidget>
           const SizedBox(width: 6),
           Text(
             label,
-            style: const TextStyle(
+            style: TextStyle(
               fontSize: 11,
               fontWeight: FontWeight.w700,
-              color: Color(0xFF475569),
+              color: isDark ? const Color(0xFF94A3B8) : const Color(0xFF475569),
               letterSpacing: 0.3,
             ),
           ),
@@ -955,18 +958,19 @@ class _MockPhoneCallWidgetState extends State<MockPhoneCallWidget>
   }
 
   Widget _buildCenterCircle() {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     Color bg;
     Color border;
     Widget iconWidget;
 
     switch (_callState) {
       case CallState.idle:
-        bg = const Color(0xFFF1F5F9);
-        border = const Color(0xFFE2E8F0);
-        iconWidget = const Icon(Icons.phone_rounded, color: Color(0xFF64748B), size: 36);
+        bg = isDark ? const Color(0xFF1E293B) : const Color(0xFFF1F5F9);
+        border = isDark ? const Color(0xFF334155) : const Color(0xFFE2E8F0);
+        iconWidget = Icon(Icons.phone_rounded, color: isDark ? const Color(0xFF94A3B8) : const Color(0xFF64748B), size: 36);
         break;
       case CallState.ringing:
-        bg = const Color(0xFFFEF3C7);
+        bg = isDark ? const Color(0xFF451A03) : const Color(0xFFFEF3C7);
         border = const Color(0xFFF59E0B);
         iconWidget = AnimatedBuilder(
           animation: _shakeCtrl,
@@ -980,7 +984,9 @@ class _MockPhoneCallWidgetState extends State<MockPhoneCallWidget>
         );
         break;
       case CallState.connected:
-        bg = _isSpeaking ? const Color(0xFFDCFCE7) : const Color(0xFFEFF6FF);
+        bg = _isSpeaking
+            ? (isDark ? const Color(0xFF064E3B) : const Color(0xFFDCFCE7))
+            : (isDark ? const Color(0xFF1E3A8A) : const Color(0xFFEFF6FF));
         border = _isSpeaking ? const Color(0xFF10B981) : const Color(0xFF2563EB);
         iconWidget = Text(
           _isSpeaking ? '🤖' : (_isListening ? '🎙️' : '💬'),
@@ -988,7 +994,7 @@ class _MockPhoneCallWidgetState extends State<MockPhoneCallWidget>
         );
         break;
       case CallState.ended:
-        bg = const Color(0xFFFEE2E2);
+        bg = isDark ? const Color(0xFF450A0A) : const Color(0xFFFEE2E2);
         border = const Color(0xFFFCA5A5);
         iconWidget = const Icon(Icons.phone_disabled_rounded, color: Color(0xFFDC2626), size: 34);
         break;
@@ -1015,23 +1021,27 @@ class _MockPhoneCallWidgetState extends State<MockPhoneCallWidget>
   }
 
   Widget _buildStateDetails() {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final primaryTextColor = isDark ? const Color(0xFFF8FAFC) : const Color(0xFF0F172A);
+    final secondaryTextColor = isDark ? const Color(0xFF94A3B8) : const Color(0xFF64748B);
+
     switch (_callState) {
       case CallState.idle:
-        return const Column(
+        return Column(
           children: [
             Text(
               'LabourLink Voice Dispatch',
               style: TextStyle(
                 fontSize: 16,
                 fontWeight: FontWeight.w800,
-                color: Color(0xFF0F172A),
+                color: primaryTextColor,
               ),
             ),
-            SizedBox(height: 4),
+            const SizedBox(height: 4),
             Text(
               'Toll-Free AI Assistant • Hindi, English, Bengali',
               textAlign: TextAlign.center,
-              style: TextStyle(fontSize: 12, color: Color(0xFF64748B)),
+              style: TextStyle(fontSize: 12, color: secondaryTextColor),
             ),
           ],
         );
@@ -1058,12 +1068,12 @@ class _MockPhoneCallWidgetState extends State<MockPhoneCallWidget>
       case CallState.connected:
         return Column(
           children: [
-            const Text(
+            Text(
               'Laxmi — AI Voice Dispatcher',
               style: TextStyle(
                 fontSize: 16,
                 fontWeight: FontWeight.w800,
-                color: Color(0xFF0F172A),
+                color: primaryTextColor,
               ),
             ),
             const SizedBox(height: 8),

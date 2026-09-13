@@ -7,6 +7,9 @@ const supabase = db.supabase || db;
 const ivrRoutes = require('./routes/ivr');
 const adminIvrRoutes = require('./routes/adminIvr');
 const ivrService = require('./services/ivrService');
+const voiceAgent = require('./voice-agent');
+const voiceTools = require('./voice-tools');
+const ngrokTunnel = require('./ngrok-tunnel');
 
 const app = express();
 const port = process.env.PORT || 3000;
@@ -370,6 +373,89 @@ app.get('/api/jobs', async (req, res) => {
     const jobs = await db.allAsync(sql, params);
     res.json({ status: 'ok', jobs: jobs || [] });
   } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/**
+ * GET /api/available-jobs
+ * Used by the ElevenLabs voice agent to fetch open jobs matching a caller's
+ * skill type and location.
+ *
+ * Query params:
+ *   skill_type  – matched against jobs.skill_needed  (case-insensitive, trimmed)
+ *   location    – matched against jobs.location       (case-insensitive, trimmed)
+ *
+ * Auth:
+ *   If ELEVENLABS_WEBHOOK_SECRET is set, the request must include it via
+ *   x-api-key header (or Authorization: Bearer <secret>).
+ *
+ * Response shape:
+ *   { "count": N, "jobs": [ { "employer_name", "wage_offered", "date_needed" } ] }
+ *   On no match: { "count": 0, "jobs": [] }
+ */
+app.all(['/api/available-jobs', '/api/voice/available-jobs', '/api/voice/tools/available_jobs'], async (req, res) => {
+  try {
+    // ── Auth check (mirrors /api/voice/tools/:toolName pattern) ──────────
+    const webhookSecret = process.env.ELEVENLABS_WEBHOOK_SECRET || process.env.INTERNAL_API_KEY;
+    if (webhookSecret) {
+      const headerSecret =
+        req.headers['x-api-key'] ||
+        req.headers['x-webhook-secret'] ||
+        (req.headers['authorization'] || '').replace(/^Bearer\s+/i, '');
+      if (headerSecret && headerSecret !== webhookSecret && headerSecret !== process.env.ELEVENLABS_API_KEY) {
+        console.warn('[available-jobs] Unauthorized request — invalid x-api-key');
+        return res.status(401).json({ error: 'Unauthorized' });
+      }
+    }
+
+    // ── Extract inputs (supports both GET query params and POST JSON body) ──
+    const src = (req.method === 'POST' && req.body && Object.keys(req.body).length > 0)
+      ? { ...req.query, ...req.body }
+      : req.query;
+
+    const rawSkill = (src.skill_type || src.skill || src.trade || '').trim().toLowerCase();
+    const rawLoc   = (src.location   || src.area  || src.city  || '').trim().toLowerCase();
+
+    // Ignore generic wildcards like 'all', 'any', 'none'
+    const skillType = (rawSkill === 'all' || rawSkill === 'any' || rawSkill === 'none') ? '' : rawSkill;
+    const location  = (rawLoc === 'all'   || rawLoc === 'any'   || rawLoc === 'none')   ? '' : rawLoc;
+
+    // ── Build query — case-insensitive trimmed equality + substring match ──
+    let sql = "SELECT employer_name, wage_offered, date_needed FROM jobs WHERE status = 'open'";
+    const params = [];
+
+    if (skillType) {
+      sql += ' AND (LOWER(TRIM(skill_needed)) = ? OR LOWER(skill_needed) LIKE ?)';
+      params.push(skillType, `%${skillType}%`);
+    }
+    if (location) {
+      sql += ' AND (LOWER(TRIM(location)) = ? OR LOWER(location) LIKE ?)';
+      params.push(location, `%${location}%`);
+    }
+
+    sql += ' ORDER BY id DESC';
+
+    const rows = await db.allAsync(sql, params);
+    const result = (rows || []).map(r => {
+      // Parse numeric wage if stored as string e.g. "₹850/day" or "Rs. 950/day"
+      let wage = r.wage_offered;
+      if (typeof wage === 'string') {
+        const num = parseInt(wage.replace(/[^0-9]/g, ''), 10);
+        if (!isNaN(num)) wage = num;
+      }
+      return {
+        employer_name: r.employer_name,
+        wage_offered:  wage,
+        date_needed:   r.date_needed || 'Today'
+      };
+    });
+
+    console.log(`[available-jobs] [${req.method}] skill="${skillType}" location="${location}" → ${result.length} result(s)`);
+    res.json({ count: result.length, jobs: result });
+
+  } catch (err) {
+    console.error('[available-jobs] Error:', err.message);
     res.status(500).json({ error: err.message });
   }
 });
@@ -1847,9 +1933,424 @@ app.get(['/jobs', '/chowk-feed'], async (req, res) => {
 db.initSchema()
   .then(() => ivrService.seedDefaultCategoriesIfEmpty())
   .catch((err) => console.warn('IVR category seed skipped:', err.message));
+/**
+ * Inbound Voice Webhook from Twilio (Media Stream Bridge to ElevenLabs)
+ * When a call is received on the toll-free number, Twilio hits this endpoint.
+ */
+app.post('/api/voice/incoming', async (req, res) => {
+  try {
+    if (!voiceAgent.validateTwilioSignature(req)) {
+      console.warn('⚠️ [Voice Webhook] Invalid Twilio signature detected.');
+      return res.status(403).send('Invalid Twilio signature');
+    }
 
-app.listen(port, '0.0.0.0', () => {
+    const twiml = await voiceAgent.handleIncomingCall(req);
+    res.setHeader('Content-Type', 'text/xml');
+    res.send(twiml);
+  } catch (err) {
+    console.error('❌ [Voice Webhook Error]', err);
+    res.setHeader('Content-Type', 'text/xml');
+    res.send(voiceAgent.generateFallbackTwiml({ reason: err.message, transferToHuman: true }));
+  }
+});
+
+/**
+ * Twilio Call Status Callback (records call duration, completion, disconnect)
+ */
+app.post('/api/voice/status', async (req, res) => {
+  try {
+    await voiceAgent.handleCallStatus(req);
+    res.status(200).send('OK');
+  } catch (err) {
+    console.error('⚠️ [Voice Status Error]', err);
+    res.status(200).send('OK');
+  }
+});
+
+/**
+ * Twilio Escalation Endpoint (transfers caller directly to human coordinator)
+ */
+app.post('/api/voice/escalate', (req, res) => {
+  try {
+    const twiml = voiceAgent.handleEscalateCall();
+    res.setHeader('Content-Type', 'text/xml');
+    res.send(twiml);
+  } catch (err) {
+    res.status(500).send(err.message);
+  }
+});
+
+/**
+ * ElevenLabs Agent Tool Dispatcher Webhook
+ * ElevenLabs Conversational AI invokes backend tools via HTTP POST
+ */
+app.post('/api/voice/tools/:toolName', async (req, res) => {
+  try {
+    const { toolName } = req.params;
+    const webhookSecret = process.env.ELEVENLABS_WEBHOOK_SECRET;
+
+    // Verify webhook secret if configured
+    if (webhookSecret) {
+      const headerSecret = req.headers['x-webhook-secret'] || req.headers['authorization'] || '';
+      const cleanHeaderSecret = headerSecret.replace(/^Bearer\s+/i, '');
+      if (cleanHeaderSecret !== webhookSecret) {
+        console.warn(`⚠️ [Voice Tools] Unauthorized tool invocation attempt for "${toolName}"`);
+        return res.status(401).json({ error: 'Unauthorized webhook request' });
+      }
+    }
+
+    const result = await voiceTools.executeTool(toolName, req.body || {});
+    res.json(result);
+  } catch (err) {
+    console.error(`❌ [Voice Tools Route Error]`, err);
+    res.status(500).json({ error: 'Internal tool execution error' });
+  }
+});
+
+/**
+ * GET /api/voice/signed-url
+ * Returns an authenticated ElevenLabs ConvAI WebSocket URL for the mobile app.
+ * The API key stays on the server; the client just gets a short-lived signed URL.
+ */
+app.get('/api/voice/signed-url', async (req, res) => {
+  try {
+    const agentId = process.env.ELEVENLABS_AGENT_ID || 'agent_6901m2bhp41ze2fvesjbry7ngh4m';
+    const apiKey  = process.env.ELEVENLABS_API_KEY;
+
+    if (!apiKey) {
+      return res.status(503).json({ error: 'ElevenLabs API key not configured on server' });
+    }
+
+    const response = await fetch(
+      `https://api.elevenlabs.io/v1/convai/conversation/get_signed_url?agent_id=${encodeURIComponent(agentId)}`,
+      { headers: { 'xi-api-key': apiKey } }
+    );
+
+    if (!response.ok) {
+      const text = await response.text();
+      console.error('[SignedURL] ElevenLabs error:', response.status, text);
+      return res.status(response.status).json({ error: `ElevenLabs: ${text}` });
+    }
+
+    const { signed_url } = await response.json();
+    console.log('[SignedURL] Issued signed URL for agent', agentId);
+    res.json({ signed_url, agent_id: agentId });
+  } catch (err) {
+    console.error('[SignedURL] Error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/**
+ * GET /api/voice/config
+ * Returns ElevenLabs API key and agent ID for mobile WebSocket auth.
+ * The app uses this key to authenticate the WebSocket connection directly.
+ */
+app.get('/api/voice/config', (req, res) => {
+  const apiKey = process.env.ELEVENLABS_API_KEY;
+  const agentId = process.env.ELEVENLABS_AGENT_ID || 'agent_6901m2bhp41ze2fvesjbry7ngh4m';
+  if (!apiKey) {
+    return res.status(503).json({ error: 'ElevenLabs not configured' });
+  }
+  res.json({ api_key: apiKey, agent_id: agentId });
+});
+
+app.all(['/api/lookup-caller', '/api/lookup_caller'], async (req, res) => {
+  const params = req.method === 'POST' ? { ...req.query, ...req.body } : req.query;
+  const result = await voiceTools.executeTool('lookup_caller', params);
+  res.json(result);
+});
+
+app.all(['/api/toggle-availability', '/api/toggle_worker_availability'], async (req, res) => {
+  const params = req.method === 'POST' ? { ...req.query, ...req.body } : req.query;
+  const result = await voiceTools.executeTool('toggle_worker_availability', params);
+  res.json(result);
+});
+
+// These are the exact URLs you paste into ElevenLabs agent Tools config.
+// ElevenLabs calls these via HTTP POST with the parameter names below.
+// ==========================================================================
+
+/**
+ * ElevenLabs Tool 1: register_worker
+ *
+ * Configure in ElevenLabs Agent → Tools → Add Tool:
+ *   Method: POST
+ *   URL:    {ngrok_or_deployed_url}/api/register-worker
+ *   Parameters:
+ *     - name         (string, required)  — worker's full name
+ *     - phone_number (string, required)  — 10-digit mobile number
+ *     - skill_type   (string, required)  — e.g. "Carpenter", "Plumber", "Mason"
+ *     - location     (string, required)  — area/city, e.g. "Indiranagar Bangalore"
+ *     - available    (boolean, optional) — true = available for work (default: true)
+ */
+app.post('/api/register-worker', async (req, res) => {
+  try {
+    const { name, phone_number, skill_type, location, available } = req.body;
+    const phone = cleanPhone(phone_number);
+    const isAvailable = available !== undefined ? (available ? 1 : 0) : 1;
+
+    // Validate required fields
+    if (!name || !phone || !skill_type || !location) {
+      return res.status(400).json({
+        success: false,
+        error: 'Missing required fields',
+        message: 'Please provide name, phone_number, skill_type, and location to register the worker.'
+      });
+    }
+
+    // Check for duplicate registration
+    const existing = await checkExistingUser(phone, 'worker');
+    if (existing.exists) {
+      return res.status(409).json({
+        success: false,
+        already_registered: true,
+        message: `Good news! ${name} is already registered on LabourLink with this phone number. No need to register again.`
+      });
+    }
+
+    // Insert into SQLite (local + offline fallback)
+    try {
+      await db.runAsync(
+        `INSERT INTO workers (name, phone_number, skill_type, location, available) VALUES (?, ?, ?, ?, ?)`,
+        [name.trim(), phone, skill_type.trim(), location.trim(), isAvailable]
+      );
+    } catch (_) {}
+
+    // Sync to Supabase
+    let worker = null;
+    if (supabase) {
+      const { data: sbWorker, error } = await supabase
+        .from('workers')
+        .insert([{ name: name.trim(), phone_number: phone, skill_type: skill_type.trim(), location: location.trim(), available: isAvailable === 1 }])
+        .select()
+        .single();
+
+      if (error && (error.code === '23505' || (error.message && error.message.toLowerCase().includes('duplicate')))) {
+        return res.status(409).json({
+          success: false,
+          already_registered: true,
+          message: `This phone number is already registered on LabourLink. No need to register again.`
+        });
+      }
+      worker = sbWorker;
+    }
+
+    if (!worker) {
+      worker = await db.getAsync('SELECT * FROM workers WHERE phone_number = ?', [phone]);
+    }
+
+    // Count open jobs in the area matching this skill
+    const matchedJobs = await db.getAsync(
+      `SELECT COUNT(*) as count FROM jobs WHERE LOWER(skill_needed) = LOWER(?) AND LOWER(location) = LOWER(?) AND status = 'open'`,
+      [skill_type.trim(), location.trim()]
+    );
+    const jobCount = (matchedJobs && matchedJobs.count) ? matchedJobs.count : 0;
+
+    console.log(`✅ [register-worker] Registered: ${name} | ${skill_type} | ${location} | Matched jobs: ${jobCount}`);
+
+    res.status(201).json({
+      success: true,
+      message: `Successfully registered ${name} as a ${skill_type} in ${location}. ${jobCount > 0 ? `Great news — there are currently ${jobCount} open job(s) matching their skill in that area!` : 'We will notify them as matching jobs are posted.'}`,
+      worker_id: worker ? worker.id : null,
+      worker_name: name,
+      skill_type,
+      location,
+      available: isAvailable === 1,
+      matched_open_jobs: jobCount
+    });
+  } catch (err) {
+    console.error('❌ [register-worker] Error:', err.message);
+    res.status(500).json({
+      success: false,
+      error: 'Registration failed due to a server error.',
+      message: 'Sorry, we could not complete the registration right now. Please try again in a moment.'
+    });
+  }
+});
+
+/**
+ * ElevenLabs Tool 2: post_job
+ *
+ * Configure in ElevenLabs Agent → Tools → Add Tool:
+ *   Method: POST
+ *   URL:    {ngrok_or_deployed_url}/api/post-job
+ *   Parameters:
+ *     - employer_name  (string, required)  — name of the employer/contractor
+ *     - employer_phone (string, required)  — employer's 10-digit mobile number
+ *     - skill_needed   (string, required)  — trade required, e.g. "Electrician"
+ *     - location       (string, required)  — work site area/city
+ *     - wage_offered   (number, optional)  — daily wage in rupees, e.g. 800
+ *     - date_needed    (string, optional)  — when work is needed, e.g. "Tomorrow", "2026-09-15"
+ *
+ * Returns: matched_workers_count so the agent can tell the employer how many workers are available.
+ */
+app.post('/api/post-job', async (req, res) => {
+  try {
+    const { employer_name, employer_phone, skill_needed, location, wage_offered, date_needed } = req.body;
+    const phone = cleanPhone(employer_phone);
+
+    // Validate required fields
+    if (!employer_name || !phone || !skill_needed || !location) {
+      return res.status(400).json({
+        success: false,
+        error: 'Missing required fields',
+        message: 'Please provide employer_name, employer_phone, skill_needed, and location to post the job.'
+      });
+    }
+
+    // Format wage string
+    const wage = wage_offered
+      ? (typeof wage_offered === 'number' ? `₹${wage_offered}/day` : String(wage_offered))
+      : 'Negotiable';
+    const date = date_needed || 'Today';
+
+    // Insert job into SQLite
+    const result = await db.runAsync(
+      `INSERT INTO jobs (employer_name, employer_phone, skill_needed, location, wage_offered, date_needed, status)
+       VALUES (?, ?, ?, ?, ?, ?, 'open')`,
+      [employer_name.trim(), phone, skill_needed.trim(), location.trim(), wage, date]
+    );
+
+    // Sync to Supabase
+    if (supabase) {
+      try {
+        await supabase.from('jobs').insert([{
+          employer_name: employer_name.trim(),
+          employer_phone: phone,
+          skill_needed: skill_needed.trim(),
+          location: location.trim(),
+          wage_offered: wage,
+          date_needed: date,
+          status: 'open'
+        }]);
+      } catch (_) {}
+    }
+
+    // Count matching available workers — this is what the agent reads back to the employer
+    const matchResult = await db.getAsync(
+      `SELECT COUNT(*) as count FROM workers
+       WHERE LOWER(skill_type) = LOWER(?) AND LOWER(location) = LOWER(?) AND available = 1`,
+      [skill_needed.trim(), location.trim()]
+    );
+    const matchedWorkersCount = (matchResult && matchResult.count) ? matchResult.count : 0;
+
+    // Also find nearby workers (same skill, different area) as a secondary count
+    const nearbyResult = await db.getAsync(
+      `SELECT COUNT(*) as count FROM workers
+       WHERE LOWER(skill_type) = LOWER(?) AND LOWER(location) != LOWER(?) AND available = 1`,
+      [skill_needed.trim(), location.trim()]
+    );
+    const nearbyCount = (nearbyResult && nearbyResult.count) ? nearbyResult.count : 0;
+
+    console.log(`✅ [post-job] Job ID ${result.lastID} | ${skill_needed} in ${location} | Wage: ${wage} | Matched workers: ${matchedWorkersCount}`);
+
+    res.status(201).json({
+      success: true,
+      job_id: result.lastID,
+      employer_name: employer_name.trim(),
+      skill_needed: skill_needed.trim(),
+      location: location.trim(),
+      wage_offered: wage,
+      date_needed: date,
+      matched_workers_count: matchedWorkersCount,
+      nearby_workers_count: nearbyCount,
+      message: matchedWorkersCount > 0
+        ? `Job posted successfully! We found ${matchedWorkersCount} available ${skill_needed} worker(s) in ${location} right now. They will be notified. ${nearbyCount > 0 ? `There are also ${nearbyCount} worker(s) in nearby areas if needed.` : ''}`
+        : `Job posted successfully with ID ${result.lastID}. There are no ${skill_needed} workers currently available in ${location}, but we will notify you as soon as a match is found. ${nearbyCount > 0 ? `There are ${nearbyCount} worker(s) in nearby areas who may be able to travel.` : ''}`
+    });
+  } catch (err) {
+    console.error('❌ [post-job] Error:', err.message);
+    res.status(500).json({
+      success: false,
+      error: 'Job posting failed due to a server error.',
+      message: 'Sorry, we could not post the job right now. Please try again in a moment.'
+    });
+  }
+});
+
+/**
+ * API: Get Voice Call History & Telephony Diagnostics (JSON)
+ */
+app.get('/api/voice/calls', async (req, res) => {
+  try {
+    const limit = parseInt(req.query.limit, 10) || 50;
+    const calls = await db.getVoiceCalls(limit);
+    const stats = await db.getVoiceCallStats();
+    const ngrokPublicUrl = ngrokTunnel.getPublicUrl();
+    res.json({
+      status: 'ok',
+      stats,
+      calls,
+      telephony: {
+        elevenLabsConfigured: Boolean(process.env.ELEVENLABS_AGENT_ID),
+        agentId: process.env.ELEVENLABS_AGENT_ID ? 'Configured (Hidden)' : 'Not Set',
+        twilioConfigured: Boolean(process.env.TWILIO_ACCOUNT_SID),
+        twilioNumber: process.env.TWILIO_PHONE_NUMBER || 'Not Set',
+        humanTransferNumber: process.env.HUMAN_TRANSFER_NUMBER || '+919900112233',
+        ngrokPublicUrl: ngrokPublicUrl || null,
+        ngrokConfigured: Boolean(process.env.NGROK_AUTHTOKEN),
+        webhookUrlIncoming: ngrokPublicUrl ? `${ngrokPublicUrl}/api/voice/incoming` : null,
+        webhookUrlStatus: ngrokPublicUrl ? `${ngrokPublicUrl}/api/voice/status` : null
+      }
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/**
+ * API: Get current ngrok public URL (for dashboard & testing scripts)
+ */
+app.get('/api/ngrok/url', (req, res) => {
+  const url = ngrokTunnel.getPublicUrl();
+  res.json({
+    status: url ? 'active' : 'inactive',
+    public_url: url || null,
+    webhook_incoming: url ? `${url}/api/voice/incoming` : null,
+    webhook_status: url ? `${url}/api/voice/status` : null,
+    ngrok_configured: Boolean(process.env.NGROK_AUTHTOKEN)
+  });
+});
+
+/**
+ * Admin Voice Dashboard (Web UI)
+ */
+app.get('/admin/voice', async (req, res) => {
+  try {
+    const calls = await db.getVoiceCalls(50);
+    const stats = await db.getVoiceCallStats();
+    const ngrokPublicUrl = ngrokTunnel.getPublicUrl();
+
+    res.render('voice-dashboard', {
+      title: 'Voice AI Telephony Dashboard',
+      activePage: 'voice',
+      calls: calls || [],
+      stats: stats || { total_calls: 0, completed_calls: 0, escalated_calls: 0, avg_duration_seconds: 0 },
+      elevenLabsConfigured: Boolean(process.env.ELEVENLABS_AGENT_ID),
+      elevenLabsAgentId: process.env.ELEVENLABS_AGENT_ID || '',
+      twilioConfigured: Boolean(process.env.TWILIO_ACCOUNT_SID),
+      twilioNumber: process.env.TWILIO_PHONE_NUMBER || '',
+      humanTransferNumber: process.env.HUMAN_TRANSFER_NUMBER || '+919900112233',
+      serverHost: req.get('host'),
+      ngrokPublicUrl: ngrokPublicUrl || null,
+      ngrokConfigured: Boolean(process.env.NGROK_AUTHTOKEN)
+    });
+  } catch (err) {
+    console.error('Error rendering voice dashboard:', err);
+    res.status(500).send(`Error loading voice dashboard: ${err.message}`);
+  }
+});
+
+app.listen(port, '0.0.0.0', async () => {
   console.log(`LabourLink server running at http://0.0.0.0:${port} (Local: http://localhost:${port})`);
+
+  // Auto-start ngrok tunnel when NGROK_AUTHTOKEN is configured
+  try {
+    await ngrokTunnel.startTunnel();
+  } catch (ngrokErr) {
+    console.warn('⚠️  [ngrok] Auto-tunnel failed (non-fatal):', ngrokErr.message);
+  }
 
   // Automatically maintain USB reverse port forwarding for connected Android devices
   try {

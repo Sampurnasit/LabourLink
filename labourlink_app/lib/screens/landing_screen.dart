@@ -5,6 +5,7 @@ import '../widgets/theme_toggle.dart';
 import 'worker_register_screen.dart';
 import 'employer_post_job_screen.dart';
 import 'role_login_screen.dart';
+import '../widgets/mock_phone_call_widget.dart';
 
 /// The initial landing screen with reactive Light and High-Contrast Dark modes.
 /// Adapts surfaces, cards, and accent contrast dynamically.
@@ -54,6 +55,23 @@ class _LandingScreenState extends State<LandingScreen>
 
     return Scaffold(
       backgroundColor: isDark ? const Color(0xFF0B111E) : const Color(0xFFEEF2F6),
+      floatingActionButton: FloatingActionButton.extended(
+        backgroundColor: const Color(0xFF10B981),
+        foregroundColor: Colors.white,
+        elevation: 6,
+        icon: const Icon(Icons.phone_in_talk_rounded),
+        label: Text(
+          'AI Voice Call',
+          style: context.font(
+            fontSize: 13,
+            fontWeight: FontWeight.w800,
+            letterSpacing: 0.2,
+          ),
+        ),
+        onPressed: () {
+          _showVoiceCallBottomSheet(context, isDark);
+        },
+      ),
       body: AnimatedContainer(
         duration: const Duration(milliseconds: 300),
         width: double.infinity,
@@ -142,6 +160,11 @@ class _LandingScreenState extends State<LandingScreen>
                     _buildCategoryBadgeCluster(isDark),
 
                     const SizedBox(height: 28),
+
+                    // ── AI Voice Agent Live Call Dispatch (Web Parity) ────
+                    _buildVoiceCallSection(context, isDark, isWide),
+
+                    const SizedBox(height: 32),
 
                     // ── Section Title ─────────────────────────────────────
                     Text(
@@ -314,6 +337,114 @@ class _LandingScreenState extends State<LandingScreen>
           ],
         ),
       ),
+    );
+  }
+
+  Widget _buildVoiceCallSection(BuildContext context, bool isDark, bool isWide) {
+    return Container(
+      constraints: const BoxConstraints(maxWidth: 480),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.center,
+        children: [
+          // Badge Pill
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+            decoration: BoxDecoration(
+              color: isDark
+                  ? const Color(0xFF1E3A8A).withValues(alpha: 0.3)
+                  : const Color(0xFFEFF6FF),
+              borderRadius: BorderRadius.circular(20),
+              border: Border.all(
+                color: isDark ? const Color(0xFF3B82F6) : const Color(0xFFBFDBFE),
+              ),
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Text('🎙️ ', style: TextStyle(fontSize: 14)),
+                Text(
+                  'AI Voice Agent Direct Line',
+                  style: context.font(
+                    color: isDark ? const Color(0xFF60A5FA) : const Color(0xFF1D4ED8),
+                    fontSize: 12,
+                    fontWeight: FontWeight.w700,
+                    letterSpacing: 0.3,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 10),
+
+          // Section Title
+          Text(
+            'Try Live AI Voice Dispatch',
+            textAlign: TextAlign.center,
+            style: context.font(
+              color: isDark ? const Color(0xFFF8FAFC) : const Color(0xFF0F172A),
+              fontSize: 22,
+              fontWeight: FontWeight.w800,
+              letterSpacing: -0.3,
+            ),
+          ),
+          const SizedBox(height: 6),
+
+          // Subtitle
+          Text(
+            'Talk to LabourLink like you\'re making a call — no typing needed.',
+            textAlign: TextAlign.center,
+            style: context.font(
+              color: isDark ? const Color(0xFF94A3B8) : const Color(0xFF64748B),
+              fontSize: 13,
+              height: 1.4,
+            ),
+          ),
+          const SizedBox(height: 16),
+
+          // Mock Phone Call Widget
+          const MockPhoneCallWidget(),
+        ],
+      ),
+    );
+  }
+
+  void _showVoiceCallBottomSheet(BuildContext context, bool isDark) {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (ctx) {
+        return Container(
+          decoration: BoxDecoration(
+            color: isDark ? const Color(0xFF0F172A) : Colors.white,
+            borderRadius: const BorderRadius.vertical(top: Radius.circular(28)),
+            border: Border.all(
+              color: isDark ? const Color(0xFF1E293B) : const Color(0xFFE2E8F0),
+            ),
+          ),
+          padding: EdgeInsets.only(
+            left: 20,
+            right: 20,
+            top: 16,
+            bottom: MediaQuery.of(ctx).viewInsets.bottom + 24,
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                width: 44,
+                height: 4,
+                decoration: BoxDecoration(
+                  color: isDark ? const Color(0xFF334155) : const Color(0xFFCBD5E1),
+                  borderRadius: BorderRadius.circular(2),
+                ),
+              ),
+              const SizedBox(height: 16),
+              const MockPhoneCallWidget(),
+            ],
+          ),
+        );
+      },
     );
   }
 }

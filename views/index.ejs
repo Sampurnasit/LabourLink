@@ -76,6 +76,24 @@
     </div>
   </div>
 
+  <!-- Mock Phone Call Interface -->
+  <section class="mock-call-section" style="margin-top: 2rem; margin-bottom: 2.5rem;">
+    <div style="text-align: center; margin-bottom: 1.25rem;">
+      <div style="display: inline-flex; align-items: center; gap: 0.4rem; background: rgba(37, 99, 235, 0.08); color: var(--primary); font-size: 0.85rem; font-weight: 700; padding: 0.35rem 0.85rem; border-radius: 9999px; margin-bottom: 0.5rem;">
+        <span>🎙️</span> AI Voice Agent Direct Line
+      </div>
+      <h2 style="font-size: 1.5rem; font-weight: 800; color: var(--text-main); margin: 0; letter-spacing: -0.01em;">
+        Try Live AI Voice Dispatch
+      </h2>
+      <p style="color: var(--text-muted); font-size: 1.02rem; margin-top: 0.4rem; font-weight: 500;">
+        Talk to LabourLink like you're making a call — no typing needed.
+      </p>
+    </div>
+
+    <!-- React Mock Phone Call Mount Element -->
+    <div id="mock-phone-call-root"></div>
+  </section>
+
   <!-- Live Stats -->
   <section class="stats-section">
     <div class="stats-grid">
@@ -137,4 +155,7 @@
   </div>
 </div>
 
+<script type="module" src="/js/mock-phone-call.bundle.js"></script>
+
 <%- include('partials/footer') %>
+

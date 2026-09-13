@@ -48,6 +48,7 @@ _external_dialai/
 dialai/
 .idea/
 .vscode/
+.freebuff/
 *.swp
 *.log
 .DS_Store

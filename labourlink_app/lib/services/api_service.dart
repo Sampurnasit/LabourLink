@@ -428,6 +428,9 @@ class ApiService {
     }
   }
 
+  static Future<Worker?> toggleWorkerAvailability(String phone, bool available) =>
+      toggleAvailability(phone, available);
+
   // 9. Get Employer's Posted Jobs
   static Future<List<Job>> getEmployerJobs(String phone) async {
     try {
@@ -667,6 +670,52 @@ class ApiService {
       debugPrint('Error fetching ElevenLabs config: $e');
       return null;
     }
+  }
+
+  // 21. Get TTS Audio URL & Bytes for voice speech playback
+  static String getTtsUrl(String text) {
+    return '$baseUrl/api/voice/tts?text=${Uri.encodeComponent(text)}';
+  }
+
+  static Future<Uint8List?> fetchTtsAudio(String text) async {
+    try {
+      final uri = Uri.parse(getTtsUrl(text));
+      final res = await http.get(uri).timeout(const Duration(seconds: 6));
+      if (res.statusCode == 200 && res.bodyBytes.isNotEmpty) {
+        return res.bodyBytes;
+      }
+      return null;
+    } catch (e) {
+      debugPrint('[ApiService] fetchTtsAudio error: $e');
+      return null;
+    }
+  }
+
+  // 22. Get Voice Job Categories from DB
+  static Future<List<Map<String, dynamic>>> getVoiceCategories() async {
+    try {
+      final res = await _safeGet('/api/voice/categories');
+      if (res != null && res.statusCode == 200) {
+        final data = jsonDecode(res.body) as Map<String, dynamic>;
+        final list = data['categories'] as List?;
+        if (list != null && list.isNotEmpty) {
+          return list.map((e) => Map<String, dynamic>.from(e as Map)).toList();
+        }
+      }
+    } catch (e) {
+      debugPrint('[ApiService] getVoiceCategories error: $e');
+    }
+    // Reliable fallback categories matching database
+    return [
+      {'digit': '1', 'category_name': 'Construction', 'hiring_agency_name': 'LabourLink Construction Desk', 'hiring_agency_phone': '+91 98765 43211'},
+      {'digit': '2', 'category_name': 'Plumbing', 'hiring_agency_name': 'LabourLink Plumbing Desk', 'hiring_agency_phone': '+91 98450 22002'},
+      {'digit': '3', 'category_name': 'Painting', 'hiring_agency_name': 'LabourLink Painting Desk', 'hiring_agency_phone': '+91 98450 33003'},
+      {'digit': '4', 'category_name': 'Electrician', 'hiring_agency_name': 'LabourLink Electrical Desk', 'hiring_agency_phone': '+91 98450 44004'},
+      {'digit': '5', 'category_name': 'Driving', 'hiring_agency_name': 'City Drivers & Logistics', 'hiring_agency_phone': '+91 97000 11122'},
+      {'digit': '6', 'category_name': 'Housekeeping', 'hiring_agency_name': 'LabourLink Cleaning & Care', 'hiring_agency_phone': '+91 98450 55005'},
+      {'digit': '7', 'category_name': 'Security', 'hiring_agency_name': 'LabourLink Guard Security', 'hiring_agency_phone': '+91 98450 66006'},
+      {'digit': '8', 'category_name': 'Warehouse / Helper', 'hiring_agency_name': 'LabourLink Warehouse Desk', 'hiring_agency_phone': '+91 98450 77007'},
+    ];
   }
 }
 

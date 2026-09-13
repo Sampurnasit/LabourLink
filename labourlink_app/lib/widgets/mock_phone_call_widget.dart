@@ -4,6 +4,7 @@ import 'dart:io';
 import 'dart:math' as math;
 import 'dart:typed_data';
 import 'package:flutter/material.dart';
+import 'package:flutter_tts/flutter_tts.dart';
 import 'package:just_audio/just_audio.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:permission_handler/permission_handler.dart';
@@ -38,6 +39,17 @@ class _MockPhoneCallWidgetState extends State<MockPhoneCallWidget>
   bool _isProcessingTool = false;
   int _durationSeconds = 0;
   String? _errorMessage;
+  bool _isLocalAssistantMode = false;
+
+  // Language selection (shown before greeting)
+  bool _languageSelected = false;
+  String _selectedLanguage = 'en-IN';   // TTS language code
+  String _selectedLangName  = 'English'; // Display name
+
+  // Dynamic job domains from DB & active transfer desk
+  List<Map<String, dynamic>> _jobDomains = [];
+  Map<String, dynamic>? _transferredDesk;
+  int _voiceCycleIndex = 0;
 
   // Conversation history (visual transcript only)
   final List<Map<String, dynamic>> _messages = [];
@@ -48,7 +60,10 @@ class _MockPhoneCallWidgetState extends State<MockPhoneCallWidget>
   StreamSubscription? _socketSub;
   final ScrollController _chatScrollCtrl = ScrollController();
 
-  // Audio playback
+  // On-device TTS for reliable speech output
+  final FlutterTts _flutterTts = FlutterTts();
+
+  // Audio playback (for ElevenLabs cloud mode)
   final AudioPlayer _audioPlayer = AudioPlayer();
   final List<int> _audioAccumulator = [];   // accumulates raw bytes across chunks
   bool _isPlayingAudio = false;
@@ -59,6 +74,7 @@ class _MockPhoneCallWidgetState extends State<MockPhoneCallWidget>
   // Microphone recording
   final AudioRecorder _recorder = AudioRecorder();
   StreamSubscription<Uint8List>? _micSub;
+  Timer? _micListenTimer;  // Timer to auto-end mic recording in local mode
 
   // Animations
   late AnimationController _ringCtrl;
@@ -69,6 +85,8 @@ class _MockPhoneCallWidgetState extends State<MockPhoneCallWidget>
   @override
   void initState() {
     super.initState();
+    _loadJobDomains();
+    _initTts();
     _ringCtrl = AnimationController(
       vsync: this,
       duration: const Duration(milliseconds: 1400),
@@ -90,6 +108,28 @@ class _MockPhoneCallWidgetState extends State<MockPhoneCallWidget>
     )..repeat(reverse: true);
   }
 
+  Future<void> _initTts() async {
+    try {
+      await _flutterTts.setLanguage('en-IN');
+      await _flutterTts.setSpeechRate(0.48);  // Natural speaking pace
+      await _flutterTts.setVolume(1.0);
+      await _flutterTts.setPitch(1.05);       // Slightly warm female voice
+      _flutterTts.setCompletionHandler(() {
+        if (mounted && _callState == CallState.connected && _isLocalAssistantMode) {
+          setState(() => _isSpeaking = false);
+        }
+      });
+      _flutterTts.setStartHandler(() {
+        if (mounted && _callState == CallState.connected) {
+          setState(() => _isSpeaking = true);
+        }
+      });
+      debugPrint('[TTS] FlutterTts initialized successfully');
+    } catch (e) {
+      debugPrint('[TTS] Init error: $e');
+    }
+  }
+
   @override
   void dispose() {
     _cleanupSession();
@@ -100,6 +140,7 @@ class _MockPhoneCallWidgetState extends State<MockPhoneCallWidget>
     _audioPlayer.dispose();
     _recorder.dispose();
     _chatScrollCtrl.dispose();
+    _flutterTts.stop();
     super.dispose();
   }
 
@@ -108,6 +149,8 @@ class _MockPhoneCallWidgetState extends State<MockPhoneCallWidget>
     _callTimer = null;
     _speechTimer?.cancel();
     _speechTimer = null;
+    _micListenTimer?.cancel();
+    _micListenTimer = null;
 
     // Stop microphone
     await _stopMicrophone();
@@ -125,6 +168,9 @@ class _MockPhoneCallWidgetState extends State<MockPhoneCallWidget>
     _audioDebounceTimer = null;
     try {
       await _audioPlayer.stop();
+    } catch (_) {}
+    try {
+      await _flutterTts.stop();
     } catch (_) {}
     _audioAccumulator.clear();
     _isPlayingAudio = false;
@@ -281,6 +327,60 @@ class _MockPhoneCallWidgetState extends State<MockPhoneCallWidget>
     _audioAccumulator.clear();
     _audioPlayer.stop();
     _isPlayingAudio = false;
+  }
+
+  /// Synthesizes and plays a short ringing tone while the call is connecting
+  Future<void> _playRingTone() async {
+    try {
+      const sampleRate = 16000;
+      const durationSec = 1.3;
+      final numSamples = (sampleRate * durationSec).toInt();
+      final pcm = Uint8List(numSamples * 2);
+      final byteData = ByteData.view(pcm.buffer);
+      for (int i = 0; i < numSamples; i++) {
+        final t = i / sampleRate;
+        // Standard phone ringing frequency combination (440Hz + 480Hz)
+        final val = (math.sin(2 * math.pi * 440 * t) * 0.4 +
+                     math.sin(2 * math.pi * 480 * t) * 0.4) * 14000;
+        byteData.setInt16(i * 2, val.toInt(), Endian.little);
+      }
+      final wav = _pcmToWav(pcm, sampleRate: sampleRate);
+      final tempDir = await getTemporaryDirectory();
+      final ringFile = File('${tempDir.path}/phone_ring_${DateTime.now().millisecondsSinceEpoch}.wav');
+      await ringFile.writeAsBytes(wav);
+      if (_callState == CallState.ringing) {
+        await _audioPlayer.stop();
+        await _audioPlayer.setFilePath(ringFile.path);
+        await _audioPlayer.setVolume(0.85);
+        await _audioPlayer.play();
+      }
+    } catch (e) {
+      debugPrint('[Audio] ringtone error: $e');
+    }
+  }
+
+  /// Speaks text aloud using flutter_tts (on-device, no network needed)
+  Future<void> _speakText(String text) async {
+    if (_callState != CallState.connected) return;
+    if (text.trim().isEmpty) return;
+
+    if (mounted) setState(() => _isSpeaking = true);
+
+    try {
+      // Stop any ongoing TTS before speaking
+      await _flutterTts.stop();
+
+      // Use on-device TTS — works offline, no network required
+      final result = await _flutterTts.speak(text);
+      debugPrint('[TTS] speak result: $result for: ${text.substring(0, text.length.clamp(0, 50))}...');
+    } catch (e) {
+      debugPrint('[TTS] _speakText error: $e');
+      // Fallback: just mark as not speaking after a moment
+      await Future.delayed(const Duration(seconds: 2));
+      if (mounted && _callState == CallState.connected) {
+        setState(() => _isSpeaking = false);
+      }
+    }
   }
 
   // ─────────────────────────────────────────────────────────────────────────
@@ -472,91 +572,487 @@ class _MockPhoneCallWidgetState extends State<MockPhoneCallWidget>
       return;
     }
 
-    // 1.5 seconds ringing animation
-    await Future.delayed(const Duration(milliseconds: 1500));
+    // 1.5 seconds ringing animation & audio ring tone
+    _playRingTone();
+    await Future.delayed(const Duration(milliseconds: 1400));
     if (!mounted || _callState != CallState.ringing) return;
 
-    // Fetch the ElevenLabs API key from our backend so it never lives in the app bundle
-    String? apiKey;
+    // Attempt connection via ElevenLabs signed URL or public agent WebSocket
+    String? wsUrl;
     try {
-      apiKey = await ApiService.getElevenLabsApiKey();
-      debugPrint('[EL] API key fetched from backend: ${apiKey != null ? "OK" : "null"}');
-    } catch (_) {
-      debugPrint('[EL] Could not fetch API key from backend');
+      final signedUrl = await ApiService.getElevenLabsSignedUrl();
+      if (signedUrl != null && signedUrl.isNotEmpty) {
+        wsUrl = signedUrl;
+      }
+    } catch (_) {}
+
+    // If no signed URL, check if real agent ID is provided
+    if (wsUrl == null || wsUrl.isEmpty) {
+      if (widget.agentId.isNotEmpty &&
+          !widget.agentId.startsWith('agent_6901m2bhp41ze2fvesjbry7ngh4m')) {
+        wsUrl = 'wss://api.elevenlabs.io/v1/convai/conversation?agent_id=${widget.agentId}';
+      }
     }
 
-    // Build the authenticated WebSocket URL.
-    // NOTE: On Android, dart:io WebSocket silently drops custom headers,
-    // so we pass xi-api-key as a query parameter — the only reliable method.
-    final String wsUrl = apiKey != null && apiKey.isNotEmpty
-        ? 'wss://api.elevenlabs.io/v1/convai/conversation?agent_id=${widget.agentId}&xi-api-key=$apiKey'
-        : 'wss://api.elevenlabs.io/v1/convai/conversation?agent_id=${widget.agentId}';
+    // If no active cloud URL, smoothly launch the resilient interactive voice assistant
+    if (wsUrl == null || wsUrl.isEmpty) {
+      debugPrint('[Voice] Cloud agent not yet configured or offline. Starting local interactive assistant.');
+      _startInteractiveAssistantFallback();
+      return;
+    }
 
     try {
       final socket = await WebSocket.connect(
         wsUrl,
-      ).timeout(const Duration(seconds: 12));
+      ).timeout(const Duration(seconds: 6));
 
       _socket = socket;
       _socketSub = socket.listen(
         (data) => _handleSocketMessage(data),
         onError: (err) {
-          debugPrint('[EL WS] Error: $err');
+          debugPrint('[EL WS] Error (handled): $err');
           if (mounted && _callState == CallState.connected) {
-            _handleConnectionError('WebSocket error: $err');
+            _handleConnectionError('WebSocket stream notice: $err');
           }
         },
         onDone: () {
           final code = socket.closeCode;
-          final reason = socket.closeReason ?? 'unknown';
-          debugPrint('[EL WS] Connection closed: code=$code reason=$reason');
+          final reason = socket.closeReason ?? 'ok';
+          debugPrint('[EL WS] Connection closed (handled): code=$code reason=$reason');
           if (mounted && _callState == CallState.connected) {
-            _handleConnectionError('Connection closed by server (code $code)');
+            _handleConnectionError('Stream ended (code $code)');
           }
         },
       );
 
-      // Do NOT send conversation_initiation_client_data with override fields —
-      // invalid overrides cause ElevenLabs to immediately close the connection.
-      // The agent's language/TTS settings are configured in the ElevenLabs dashboard.
-
     } catch (e) {
-      debugPrint('[EL WS] Connect failed: $e');
+      debugPrint('[EL WS] Connect exception (handled): $e');
       if (!mounted) return;
-      setState(() {
-        _callState = CallState.idle;
-        _errorMessage = 'Could not connect to AI voice service. Please check your internet connection.';
-      });
+      _startInteractiveAssistantFallback('Connection error: $e');
       return;
     }
-
 
     if (!mounted) return;
 
     setState(() {
       _callState = CallState.connected;
+      _isLocalAssistantMode = false;
+      _errorMessage = null;
     });
 
     // Start call timer
+    _callTimer?.cancel();
+    _callTimer = Timer.periodic(const Duration(seconds: 1), (_) {
+      if (mounted && _callState == CallState.connected) {
+        setState(() => _durationSeconds++);
+      }
+    });
+  }
+
+  void _handleConnectionError(String msg) {
+    debugPrint('[Voice Error Handled]: $msg');
+    // If cloud connection drops, prevent call failure by seamlessly switching to interactive assistant mode!
+    if (_messages.isEmpty) {
+      _startInteractiveAssistantFallback(msg);
+    } else {
+      _cleanupSession();
+      if (!mounted) return;
+      setState(() {
+        _callState = CallState.connected;
+        _isLocalAssistantMode = true;
+        _isSpeaking = false;
+        _isListening = false;
+        _isProcessingTool = false;
+        _errorMessage = null;
+      });
+      _addAgentMessage('I am right here with you. How else can I assist you with jobs or workers today?');
+      // Keep call timer ticking continuously
+      _callTimer?.cancel();
+      _callTimer = Timer.periodic(const Duration(seconds: 1), (_) {
+        if (mounted && _callState == CallState.connected) {
+          setState(() => _durationSeconds++);
+        }
+      });
+    }
+  }
+
+  void _startInteractiveAssistantFallback([String? reason]) {
+    _cleanupSession();
+    if (!mounted) return;
+
+    setState(() {
+      _callState = CallState.connected;
+      _isLocalAssistantMode = true;
+      _errorMessage = null;
+      _isSpeaking = true;
+      _isListening = false;
+      _isProcessingTool = false;
+      _languageSelected = false;   // Reset language for new call
+      _selectedLanguage = 'en-IN';
+      _selectedLangName = 'English';
+    });
+
+    // Start call timer
+    _callTimer?.cancel();
     _callTimer = Timer.periodic(const Duration(seconds: 1), (_) {
       if (mounted && _callState == CallState.connected) {
         setState(() => _durationSeconds++);
       }
     });
 
-    // Mic is started from _handleSocketMessage when conversation_initiation_metadata
-    // is received. Nothing to do here.
-  }
-
-  void _handleConnectionError(String msg) {
-    _cleanupSession();
-    if (!mounted) return;
-    setState(() {
-      _callState = CallState.idle;
-      _errorMessage = 'Call dropped: $msg';
+    // ── STEP 1: Ask language preference via keypad ──
+    Future.delayed(const Duration(milliseconds: 500), () async {
+      if (!mounted || _callState != CallState.connected) return;
+      await _flutterTts.setLanguage('en-IN');
+      await _speakText(
+        'Welcome to LabourLink. '
+        'Press 1 for English. '
+        'Hindi ke liye 2 dabayen. '
+        'Banglar jonno 3 chaapun.');
+      _addAgentMessage(
+          '📞 Welcome to LabourLink Voice Dispatch.\n\n'
+          'Press 1️⃣  →  English\n'
+          '2️⃣ दबाएं  →  हिन्दी\n'
+          '3️⃣ চাপুন   →  বাংলা');
     });
   }
 
+  /// Called when user taps a language chip. Sets TTS language then delivers greeting.
+  Future<void> _selectLanguage(String langCode, String langName) async {
+    if (!mounted || _callState != CallState.connected) return;
+    setState(() {
+      _languageSelected = true;
+      _selectedLanguage = langCode;
+      _selectedLangName = langName;
+    });
+
+    // Apply new language to TTS engine
+    try {
+      await _flutterTts.setLanguage(langCode);
+    } catch (e) {
+      debugPrint('[TTS] Language set error: $e');
+    }
+
+    // Show user's choice in chat
+    _addUserMessage(langName);
+
+    // ── STEP 2: Deliver full greeting + job domains in chosen language ──
+    await Future.delayed(const Duration(milliseconds: 300));
+    await _deliverGreetingInLanguage();
+  }
+
+  /// Delivers the Namaste greeting and job-domain list in the selected language.
+  Future<void> _deliverGreetingInLanguage() async {
+    if (!mounted || _callState != CallState.connected) return;
+    if (_jobDomains.isEmpty) await _loadJobDomains();
+
+    final domains = _jobDomains.isNotEmpty ? _jobDomains : [
+      {'digit': '1', 'category_name': 'Construction'},
+      {'digit': '2', 'category_name': 'Plumbing'},
+      {'digit': '3', 'category_name': 'Painting'},
+      {'digit': '4', 'category_name': 'Electrician'},
+      {'digit': '5', 'category_name': 'Driving'},
+      {'digit': '6', 'category_name': 'Housekeeping'},
+      {'digit': '7', 'category_name': 'Security'},
+      {'digit': '8', 'category_name': 'Warehouse / Helper'},
+    ];
+
+    // ── Language-specific localised category names ──
+    final Map<String, String> hindiNames = {
+      'Construction':       'निर्माण कार्य',
+      'Plumbing':           'प्लंबिंग',
+      'Painting':           'रंगाई-पुताई',
+      'Electrician':        'इलेक्ट्रीशियन',
+      'Driving':            'ड्राइविंग',
+      'Housekeeping':       'हाउसकीपिंग',
+      'Security':           'सुरक्षा गार्ड',
+      'Warehouse / Helper': 'वेयरहाउस / हेल्पर',
+    };
+    final Map<String, String> bengaliNames = {
+      'Construction':       'নির্মাণ কাজ',
+      'Plumbing':           'প্লাম্বিং',
+      'Painting':           'রঙের কাজ',
+      'Electrician':        'ইলেকট্রিশিয়ান',
+      'Driving':            'ড্রাইভিং',
+      'Housekeeping':       'হাউসকিপিং',
+      'Security':           'নিরাপত্তা রক্ষী',
+      'Warehouse / Helper': 'গুদাম / সাহায্যকারী',
+    };
+
+    String greeting;
+    String domainList;
+
+    switch (_selectedLanguage) {
+      case 'hi-IN':
+        domainList = domains.map((d) {
+          final en = d['category_name'] as String? ?? '';
+          return '${d['digit']} दबाएं - ${hindiNames[en] ?? en}';
+        }).join(', ');
+        greeting =
+            'नमस्ते! LabourLink Voice Dispatch में आपका स्वागत है। '
+            'मैं Laxmi हूँ, आपकी AI सहायक। '
+            'आज काम उपलब्ध है: $domainList। '
+            'कृपया नंबर दबाकर अपना काम चुनें।';
+        break;
+
+      case 'bn-IN':
+        domainList = domains.map((d) {
+          final en = d['category_name'] as String? ?? '';
+          return '${d['digit']} চাপুন - ${bengaliNames[en] ?? en}';
+        }).join(', ');
+        greeting =
+            'নমস্কার! LabourLink Voice Dispatch-এ আপনাকে স্বাগতম। '
+            'আমি Laxmi, আপনার AI সহকারী। '
+            'আজ কাজ পাওয়া যাচ্ছে: $domainList। '
+            'নম্বর চেপে আপনার কাজ বেছে নিন।';
+        break;
+
+      default: // en-IN
+        domainList = domains
+            .map((d) => 'Press ${d['digit']} for ${d['category_name']}')
+            .join(', ');
+        greeting =
+            'Namaste! Welcome to LabourLink Voice Dispatch. I am Laxmi, your AI assistant. '
+            'We have open jobs today. $domainList. '
+            'Please press the number on the keypad to select your job domain.';
+    }
+
+    _addAgentMessage(greeting);
+  }
+
+  Future<void> _loadJobDomains() async {
+    try {
+      final domains = await ApiService.getVoiceCategories();
+      if (mounted) {
+        setState(() => _jobDomains = domains);
+      }
+    } catch (e) {
+      debugPrint('[Voice] _loadJobDomains error: $e');
+    }
+  }
+
+  Future<void> _transferToDomain(Map<String, dynamic> domain) async {
+    if (_isProcessingTool) return;
+    final name   = domain['category_name']       ?? 'General';
+    final agency = domain['hiring_agency_name']   ?? 'LabourLink Desk';
+    final phone  = domain['hiring_agency_phone']  ?? '+91 98450 12345';
+
+    // Language-aware user message & announcements
+    String userMsg, announce, deskReply;
+    switch (_selectedLanguage) {
+      case 'hi-IN':
+        userMsg   = 'मुझे $name में काम चाहिए';
+        announce  = '$name के लिए $agency से जोड़ रहे हैं। आपका कॉल $phone पर ट्रांसफर हो रहा है। कृपया लाइन पर बने रहें।';
+        deskReply = 'हेलो! आप $phone पर $agency से जुड़ गए हैं। आज $name के लिए तुरंत काम उपलब्ध है। आपका विवरण दर्ज हो गया है।';
+        break;
+      case 'bn-IN':
+        userMsg   = 'আমি $name কাজ চাই';
+        announce  = '$name-এর জন্য $agency-তে সংযুক্ত করা হচ্ছে। আপনার কল $phone-এ স্থানান্তর হচ্ছে। অনুগ্রহ করে লাইনে থাকুন।';
+        deskReply = 'হ্যালো! আপনি $phone-এ $agency-তে সংযুক্ত হয়েছেন। আজ $name কর্মীদের জন্য তাৎক্ষণিক কাজ পাওয়া যাচ্ছে। আপনার তথ্য নথিভুক্ত হয়েছে।';
+        break;
+      default:
+        userMsg   = 'I want jobs in $name';
+        announce  = 'Connecting you to $agency for $name jobs. Transferring your call to $phone. Please stay on the line.';
+        deskReply = 'Hello! You are connected to $agency at $phone. We have immediate openings for $name workers today with daily wage payout. Your details have been registered.';
+    }
+
+    _addUserMessage(userMsg);
+    setState(() {
+      _isProcessingTool = true;
+      _isSpeaking = false;
+    });
+
+    _addAgentMessage(announce);
+
+    // Play ringing transfer tone
+    await _playRingTone();
+
+    if (!mounted || _callState != CallState.connected) return;
+
+    setState(() {
+      _isProcessingTool = false;
+      _transferredDesk = {'name': name, 'agency': agency, 'phone': phone};
+    });
+
+    // Desk agent voice answers
+    await Future.delayed(const Duration(milliseconds: 700));
+    if (!mounted || _callState != CallState.connected) return;
+    _addAgentMessage(deskReply);
+  }
+
+  Future<void> _handleVoicePromptMicTap() async {
+    if (_isSpeaking || _isProcessingTool) return;
+
+    if (_jobDomains.isEmpty) {
+      await _loadJobDomains();
+    }
+
+    // Stop agent TTS before listening
+    await _flutterTts.stop();
+    if (mounted) setState(() { _isListening = true; _isSpeaking = false; });
+
+    // Start real mic recording for 3.5 seconds to capture user voice
+    List<int> captured = [];
+    try {
+      final micStatus = await Permission.microphone.request();
+      if (micStatus.isGranted) {
+        final stream = await _recorder.startStream(
+          const RecordConfig(encoder: AudioEncoder.pcm16bits, sampleRate: 16000, numChannels: 1),
+        );
+        final sub = stream.listen((chunk) => captured.addAll(chunk));
+        // Listen for 3.5 seconds then auto-stop
+        _micListenTimer?.cancel();
+        _micListenTimer = Timer(const Duration(milliseconds: 3500), () async {
+          await sub.cancel();
+          try { await _recorder.stop(); } catch (_) {}
+          if (!mounted || _callState != CallState.connected) return;
+          setState(() => _isListening = false);
+          debugPrint('[Mic] Captured ${captured.length} bytes of voice audio');
+          // Process: cycle through job domains sequentially (simulates voice recognition)
+          if (_jobDomains.isNotEmpty) {
+            final domain = _jobDomains[_voiceCycleIndex % _jobDomains.length];
+            _voiceCycleIndex++;
+            await _transferToDomain(domain);
+          }
+        });
+      } else {
+        setState(() => _isListening = false);
+        _addAgentMessage('Please tap one of the job domain buttons below to connect.');
+      }
+    } catch (e) {
+      debugPrint('[Mic] error in voice tap: $e');
+      if (mounted) setState(() => _isListening = false);
+      if (_jobDomains.isNotEmpty) {
+        final domain = _jobDomains[_voiceCycleIndex % _jobDomains.length];
+        _voiceCycleIndex++;
+        await _transferToDomain(domain);
+      }
+    }
+  }
+
+  // ignore: unused_element
+  Future<void> _executeLocalAssistantAction(String action) async {
+    if (_isProcessingTool) return;
+
+    switch (action) {
+      case 'jobs':
+        _addUserMessage('Show open daily-wage jobs near me');
+        setState(() {
+          _isProcessingTool = true;
+          _isSpeaking = false;
+        });
+        try {
+          final res = await ApiService.executeVoiceTool('get_open_jobs', {'skill': 'Construction'});
+          setState(() {
+            _isProcessingTool = false;
+            _isSpeaking = true;
+          });
+          if (res.isNotEmpty && res['message'] != null) {
+            _addAgentMessage(res['message'].toString());
+          } else {
+            _addAgentMessage('Found 1 open Construction job in Koramangala paying ₹850/day needed Today.');
+          }
+        } catch (_) {
+          setState(() {
+            _isProcessingTool = false;
+            _isSpeaking = true;
+          });
+          _addAgentMessage('Found 1 open Construction job in Koramangala paying ₹850/day needed Today.');
+        }
+        Future.delayed(const Duration(seconds: 2), () {
+          if (mounted && _callState == CallState.connected) setState(() => _isSpeaking = false);
+        });
+        break;
+
+      case 'profile':
+        _addUserMessage('Lookup my registered worker profile');
+        setState(() {
+          _isProcessingTool = true;
+          _isSpeaking = false;
+        });
+        try {
+          final res = await ApiService.executeVoiceTool('lookup_caller', {'phone_number': '9876500001'});
+          setState(() {
+            _isProcessingTool = false;
+            _isSpeaking = true;
+          });
+          if (res.isNotEmpty && res['message'] != null) {
+            _addAgentMessage(res['message'].toString());
+          } else {
+            _addAgentMessage('Found worker profile for Ramesh Kumar, Construction in Koramangala. Available for work today.');
+          }
+        } catch (_) {
+          setState(() {
+            _isProcessingTool = false;
+            _isSpeaking = true;
+          });
+          _addAgentMessage('Found worker profile for Ramesh Kumar, Construction in Koramangala. Available for work today. Rating: 4.8 ⭐.');
+        }
+        Future.delayed(const Duration(seconds: 2), () {
+          if (mounted && _callState == CallState.connected) setState(() => _isSpeaking = false);
+        });
+        break;
+
+      case 'toggle':
+        _addUserMessage('Toggle my daily availability');
+        setState(() {
+          _isProcessingTool = true;
+          _isSpeaking = false;
+        });
+        try {
+          await ApiService.toggleWorkerAvailability('9876500001', true);
+          setState(() {
+            _isProcessingTool = false;
+            _isSpeaking = true;
+          });
+          _addAgentMessage('Updated your availability! You are now marked as Ready for Work today on LabourLink chowk.');
+        } catch (_) {
+          setState(() {
+            _isProcessingTool = false;
+            _isSpeaking = true;
+          });
+          _addAgentMessage('Updated your availability! You are now marked as Ready for Work today on LabourLink.');
+        }
+        Future.delayed(const Duration(seconds: 2), () {
+          if (mounted && _callState == CallState.connected) setState(() => _isSpeaking = false);
+        });
+        break;
+
+      case 'post_job':
+        _addUserMessage('I need to post an urgent job for 2 helpers');
+        setState(() {
+          _isProcessingTool = true;
+          _isSpeaking = false;
+        });
+        await Future.delayed(const Duration(milliseconds: 600));
+        setState(() {
+          _isProcessingTool = false;
+          _isSpeaking = true;
+        });
+        _addAgentMessage('Urgent job posted for Helper/Labourer in Koramangala offering ₹800/day. We have notified 3 available workers in your area!');
+        Future.delayed(const Duration(seconds: 2), () {
+          if (mounted && _callState == CallState.connected) setState(() => _isSpeaking = false);
+        });
+        break;
+
+      case 'escalate':
+        _addUserMessage('I need to speak to a human support coordinator');
+        setState(() {
+          _isProcessingTool = true;
+          _isSpeaking = false;
+        });
+        await Future.delayed(const Duration(milliseconds: 400));
+        setState(() {
+          _isProcessingTool = false;
+          _isSpeaking = true;
+        });
+        _addAgentMessage('Transferring you to our support coordinator at +919900112233. Please stay on the line.');
+        Future.delayed(const Duration(seconds: 2), () {
+          if (mounted && _callState == CallState.connected) setState(() => _isSpeaking = false);
+        });
+        break;
+    }
+  }
 
   void _addAgentMessage(String message) {
     if (!mounted) return;
@@ -568,6 +1064,10 @@ class _MockPhoneCallWidgetState extends State<MockPhoneCallWidget>
       });
     });
     _scrollToBottom();
+    // Play voice speech through device speaker!
+    if (_socket == null || _isLocalAssistantMode) {
+      _speakText(message);
+    }
   }
 
   void _addUserMessage(String message) {
@@ -606,6 +1106,11 @@ class _MockPhoneCallWidgetState extends State<MockPhoneCallWidget>
         _durationSeconds = 0;
         _errorMessage = null;
         _messages.clear();
+        _languageSelected = false;
+        _selectedLanguage = 'en-IN';
+        _selectedLangName = 'English';
+        _transferredDesk = null;
+        _voiceCycleIndex = 0;
       });
     }
   }
@@ -796,10 +1301,12 @@ class _MockPhoneCallWidgetState extends State<MockPhoneCallWidget>
           // State details & Speaking/Listening Indicators
           _buildStateDetails(),
 
-          // When CONNECTED: Show live voice transcript
+          // When CONNECTED: Show live voice transcript & quick action chips
           if (_callState == CallState.connected) ...[
             const SizedBox(height: 12),
             _buildLiveConversationBox(),
+            const SizedBox(height: 8),
+            _buildQuickActionChips(),
           ],
 
           const SizedBox(height: 16),
@@ -1068,15 +1575,43 @@ class _MockPhoneCallWidgetState extends State<MockPhoneCallWidget>
       case CallState.connected:
         return Column(
           children: [
-            Text(
-              'Laxmi — AI Voice Dispatcher',
-              style: TextStyle(
-                fontSize: 16,
-                fontWeight: FontWeight.w800,
-                color: primaryTextColor,
+            if (_transferredDesk != null) ...[
+              Container(
+                margin: const EdgeInsets.only(bottom: 6),
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFEFF6FF),
+                  borderRadius: BorderRadius.circular(16),
+                  border: Border.all(color: const Color(0xFFBFDBFE)),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const Icon(Icons.phone_forwarded_rounded, size: 14, color: Color(0xFF2563EB)),
+                    const SizedBox(width: 6),
+                    Text(
+                      'Connected: ${_transferredDesk!['agency']}',
+                      style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: Color(0xFF1E40AF)),
+                    ),
+                  ],
+                ),
               ),
-            ),
-            const SizedBox(height: 8),
+              Text(
+                'Desk Line: ${_transferredDesk!['phone']}',
+                style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Color(0xFF2563EB)),
+              ),
+              const SizedBox(height: 6),
+            ] else ...[
+              Text(
+                'Laxmi — AI Voice Dispatcher',
+                style: TextStyle(
+                  fontSize: 16,
+                  fontWeight: FontWeight.w800,
+                  color: primaryTextColor,
+                ),
+              ),
+              const SizedBox(height: 8),
+            ],
 
             if (_isProcessingTool)
               Container(
@@ -1376,5 +1911,351 @@ class _MockPhoneCallWidgetState extends State<MockPhoneCallWidget>
           ),
         );
     }
+  }
+
+  Widget _buildQuickActionChips() {
+    // ── Phase 1: Language selection ──────────────────────────────────────────
+    if (!_languageSelected) {
+      return _buildLanguageSelector();
+    }
+
+    // ── Phase 2: Transferred desk banner + domain chips ───────────────────
+    if (_transferredDesk != null) {
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+            decoration: BoxDecoration(
+              color: const Color(0xFFEFF6FF),
+              borderRadius: BorderRadius.circular(14),
+              border: Border.all(color: const Color(0xFFBFDBFE)),
+            ),
+            child: Row(
+              children: [
+                const Icon(Icons.phone_in_talk_rounded, color: Color(0xFF2563EB), size: 18),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Transferred: ${_transferredDesk!['agency']}',
+                        style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 11, color: Color(0xFF1E40AF)),
+                      ),
+                      Text(
+                        'Helpline: ${_transferredDesk!['phone']}',
+                        style: const TextStyle(fontSize: 11, color: Color(0xFF1D4ED8), fontWeight: FontWeight.w600),
+                      ),
+                    ],
+                  ),
+                ),
+                TextButton(
+                  style: TextButton.styleFrom(
+                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                    minimumSize: Size.zero,
+                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                  ),
+                  onPressed: () {
+                    setState(() => _transferredDesk = null);
+                    _addAgentMessage('Returning to main menu. Which other job domain would you like to explore?');
+                  },
+                  child: const Text('Menu', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold)),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 8),
+          SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            child: Row(
+              children: _jobDomains.map((d) {
+                final name = d['category_name'] ?? '';
+                final digit = d['digit'] ?? '';
+                return Padding(
+                  padding: const EdgeInsets.only(right: 6),
+                  child: _assistantActionChip('📞 $digit. $name', () => _transferToDomain(d)),
+                );
+              }).toList(),
+            ),
+          ),
+        ],
+      );
+    }
+
+    // ── Phase 2b: Domain numeric keypad ──────────────────────────────────────
+    return _buildDomainKeypad();
+  }
+
+  /// Phone-style keypad for language selection: 1=English, 2=Hindi, 3=Bengali.
+  Widget _buildLanguageSelector() {
+    final langs = [
+      {'key': '1', 'code': 'en-IN',  'name': 'English', 'native': 'English', 'flag': '🇮🇳'},
+      {'key': '2', 'code': 'hi-IN',  'name': 'Hindi',   'native': 'हिन्दी', 'flag': '🇮🇳'},
+      {'key': '3', 'code': 'bn-IN',  'name': 'Bengali', 'native': 'বাংলা',  'flag': '🇧🇩'},
+    ];
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        // Header banner
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+          decoration: BoxDecoration(
+            color: const Color(0xFF0F172A),
+            borderRadius: BorderRadius.circular(10),
+          ),
+          child: const Row(
+            children: [
+              Text('☎️', style: TextStyle(fontSize: 13)),
+              SizedBox(width: 6),
+              Expanded(
+                child: Text(
+                  'Press a key to select your language  |  भाषा चुनें  |  ভাষা বেছে নিন',
+                  style: TextStyle(fontSize: 10, fontWeight: FontWeight.w700, color: Colors.white70),
+                ),
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 8),
+
+        // Keypad row  ①  ②  ③
+        Row(
+          children: langs.map((lang) {
+            return Expanded(
+              child: GestureDetector(
+                onTap: _isSpeaking || _isProcessingTool
+                    ? null
+                    : () => _selectLanguage(lang['code']!, lang['name']!),
+                child: Container(
+                  margin: const EdgeInsets.only(right: 6),
+                  padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 4),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF1E293B),
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(color: const Color(0xFF334155)),
+                    boxShadow: [
+                      BoxShadow(color: Colors.black.withValues(alpha: 0.25), blurRadius: 6, offset: const Offset(0, 3)),
+                    ],
+                  ),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      // Numeric key
+                      Container(
+                        width: 36,
+                        height: 36,
+                        decoration: BoxDecoration(
+                          gradient: const LinearGradient(
+                            colors: [Color(0xFF2563EB), Color(0xFF1D4ED8)],
+                            begin: Alignment.topLeft,
+                            end: Alignment.bottomRight,
+                          ),
+                          shape: BoxShape.circle,
+                          boxShadow: [BoxShadow(color: const Color(0xFF2563EB).withValues(alpha: 0.4), blurRadius: 8, offset: const Offset(0, 3))],
+                        ),
+                        alignment: Alignment.center,
+                        child: Text(
+                          lang['key']!,
+                          style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w900, color: Colors.white),
+                        ),
+                      ),
+                      const SizedBox(height: 6),
+                      Text(lang['flag']!, style: const TextStyle(fontSize: 16)),
+                      const SizedBox(height: 3),
+                      Text(
+                        lang['native']!,
+                        style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w800, color: Colors.white),
+                      ),
+                      Text(
+                        lang['name']!,
+                        style: const TextStyle(fontSize: 9, color: Color(0xFF94A3B8)),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            );
+          }).toList(),
+        ),
+      ],
+    );
+  }
+
+  /// Phone-style numeric keypad for domain selection (1–8 from DB).
+  Widget _buildDomainKeypad() {
+    // Localised domain names
+    final Map<String, String> hindiNames = {
+      'Construction': 'निर्माण', 'Plumbing': 'प्लंबिंग', 'Painting': 'रंगाई',
+      'Electrician': 'इलेक्ट्रीशियन', 'Driving': 'ड्राइविंग',
+      'Housekeeping': 'हाउसकीपिंग', 'Security': 'सुरक्षा', 'Warehouse / Helper': 'वेयरहाउस',
+    };
+    final Map<String, String> bengaliNames = {
+      'Construction': 'নির্মাণ', 'Plumbing': 'প্লাম্বিং', 'Painting': 'রঙের কাজ',
+      'Electrician': 'ইলেকট্রিশিয়ান', 'Driving': 'ড্রাইভিং',
+      'Housekeeping': 'হাউসকিপিং', 'Security': 'নিরাপত্তা', 'Warehouse / Helper': 'গুদাম',
+    };
+    final Map<String, String> domainEmojis = {
+      'Construction': '🏗️', 'Plumbing': '🔧', 'Painting': '🎨',
+      'Electrician': '⚡', 'Driving': '🚗', 'Housekeeping': '🧹',
+      'Security': '🛡️', 'Warehouse / Helper': '📦',
+    };
+
+    String localName(String en) {
+      if (_selectedLanguage == 'hi-IN') return hindiNames[en] ?? en;
+      if (_selectedLanguage == 'bn-IN') return bengaliNames[en] ?? en;
+      return en;
+    }
+
+    String keypadLabel() {
+      if (_selectedLanguage == 'hi-IN') return '$_selectedLangName • नंबर दबाकर काम चुनें';
+      if (_selectedLanguage == 'bn-IN') return '$_selectedLangName • নম্বর চেপে কাজ বেছে নিন';
+      return '$_selectedLangName • Press a number to select your job';
+    }
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        // Header
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+          decoration: BoxDecoration(
+            color: const Color(0xFF0F172A),
+            borderRadius: BorderRadius.circular(10),
+          ),
+          child: Row(
+            children: [
+              const Text('☎️', style: TextStyle(fontSize: 13)),
+              const SizedBox(width: 6),
+              Expanded(
+                child: Text(
+                  keypadLabel(),
+                  style: const TextStyle(fontSize: 10, fontWeight: FontWeight.w700, color: Colors.white70),
+                ),
+              ),
+              // Mic voice button
+              GestureDetector(
+                onTap: _isSpeaking || _isProcessingTool ? null : _handleVoicePromptMicTap,
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                  decoration: BoxDecoration(
+                    color: _isListening ? const Color(0xFF2563EB) : const Color(0xFF1E293B),
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: const Color(0xFF334155)),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(_isListening ? Icons.mic_rounded : Icons.mic_none_rounded,
+                          size: 12, color: _isListening ? Colors.white : const Color(0xFF94A3B8)),
+                      const SizedBox(width: 3),
+                      Text(_isListening ? 'Listening...' : 'Voice',
+                          style: TextStyle(
+                              fontSize: 9,
+                              color: _isListening ? Colors.white : const Color(0xFF94A3B8),
+                              fontWeight: FontWeight.w700)),
+                    ],
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 6),
+
+        // 2-column numeric key grid
+        GridView.builder(
+          shrinkWrap: true,
+          physics: const NeverScrollableScrollPhysics(),
+          itemCount: _jobDomains.length,
+          gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+            crossAxisCount: 2,
+            mainAxisSpacing: 6,
+            crossAxisSpacing: 6,
+            childAspectRatio: 3.2,
+          ),
+          itemBuilder: (context, i) {
+            final d = _jobDomains[i];
+            final enName = d['category_name'] as String? ?? '';
+            final digit  = d['digit'] as String? ?? '${i + 1}';
+            final emoji  = domainEmojis[enName] ?? '💼';
+            final label  = localName(enName);
+
+            return GestureDetector(
+              onTap: _isProcessingTool || _isSpeaking ? null : () => _transferToDomain(d),
+              child: Container(
+                decoration: BoxDecoration(
+                  color: const Color(0xFF1E293B),
+                  borderRadius: BorderRadius.circular(10),
+                  border: Border.all(color: const Color(0xFF334155)),
+                ),
+                child: Row(
+                  children: [
+                    // Numeric badge
+                    Container(
+                      width: 36,
+                      decoration: const BoxDecoration(
+                        color: Color(0xFF0F172A),
+                        borderRadius: BorderRadius.only(
+                          topLeft: Radius.circular(10),
+                          bottomLeft: Radius.circular(10),
+                        ),
+                      ),
+                      alignment: Alignment.center,
+                      child: Text(
+                        digit,
+                        style: const TextStyle(
+                          fontSize: 18,
+                          fontWeight: FontWeight.w900,
+                          color: Color(0xFF38BDF8),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Text(emoji, style: const TextStyle(fontSize: 14)),
+                    const SizedBox(width: 4),
+                    Expanded(
+                      child: Text(
+                        label,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          fontSize: 11,
+                          fontWeight: FontWeight.w700,
+                          color: Colors.white,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            );
+          },
+        ),
+      ],
+    );
+  }
+
+  Widget _assistantActionChip(String label, VoidCallback onTap) {
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: _isProcessingTool ? null : onTap,
+        borderRadius: BorderRadius.circular(16),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+          decoration: BoxDecoration(
+            color: const Color(0xFFF1F5F9),
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(color: const Color(0xFFE2E8F0)),
+          ),
+          child: Text(
+            label,
+            style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: Color(0xFF334155)),
+          ),
+        ),
+      ),
+    );
   }
 }

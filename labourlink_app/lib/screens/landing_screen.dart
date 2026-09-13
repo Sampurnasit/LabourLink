@@ -4,6 +4,7 @@ import '../widgets/language_selector.dart';
 import 'worker_register_screen.dart';
 import 'employer_post_job_screen.dart';
 import 'role_login_screen.dart';
+import '../widgets/mock_phone_call_widget.dart';
 
 /// The initial landing screen presenting dual role-selection cards
 /// for Worker and Hirer. Supports multi-language internationalization (en/hi/bn).
@@ -130,7 +131,12 @@ class _LandingScreenState extends State<LandingScreen>
                             ],
                           ),
 
-                    const SizedBox(height: 36),
+                    const SizedBox(height: 28),
+
+                    // Mock Phone Call Interface
+                    const MockPhoneCallWidget(),
+
+                    const SizedBox(height: 28),
 
                     // ── Browse Jobs row ───────────────────────────────────
                     _buildBrowseChip(context),

@@ -621,4 +621,52 @@ class ApiService {
       return false;
     }
   }
+
+  // 18. Voice AI Agent Backend Automation Tools
+  static Future<Map<String, dynamic>> executeVoiceTool(
+    String toolName,
+    Map<String, dynamic> params,
+  ) async {
+    try {
+      final res = await _safePost('/api/voice/tools/$toolName', params);
+      if (res != null && res.statusCode == 200) {
+        return jsonDecode(res.body) as Map<String, dynamic>;
+      }
+      return {};
+    } catch (e) {
+      debugPrint('Error executing voice tool $toolName: $e');
+      return {};
+    }
+  }
+
+  // 19. Get ElevenLabs Signed WebSocket URL (authenticated via backend)
+  static Future<String?> getElevenLabsSignedUrl() async {
+    try {
+      final res = await _safeGet('/api/voice/signed-url');
+      if (res != null && res.statusCode == 200) {
+        final data = jsonDecode(res.body) as Map<String, dynamic>;
+        return data['signed_url'] as String?;
+      }
+      return null;
+    } catch (e) {
+      debugPrint('Error fetching ElevenLabs signed URL: $e');
+      return null;
+    }
+  }
+
+  // 20. Get ElevenLabs API key from backend (for mobile WebSocket auth)
+  static Future<String?> getElevenLabsApiKey() async {
+    try {
+      final res = await _safeGet('/api/voice/config');
+      if (res != null && res.statusCode == 200) {
+        final data = jsonDecode(res.body) as Map<String, dynamic>;
+        return data['api_key'] as String?;
+      }
+      return null;
+    } catch (e) {
+      debugPrint('Error fetching ElevenLabs config: $e');
+      return null;
+    }
+  }
 }
+

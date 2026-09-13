@@ -6,6 +6,7 @@ import 'worker_dashboard_screen.dart';
 import 'employer_post_job_screen.dart';
 import 'employer_dashboard_screen.dart';
 import 'public_board_screen.dart';
+import '../widgets/mock_phone_call_widget.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -474,6 +475,11 @@ class _HomeScreenState extends State<HomeScreen> {
                   ).then((_) => _loadData());
                 },
               ),
+
+              const SizedBox(height: 18),
+
+              // Mock Phone Call Interface
+              const MockPhoneCallWidget(),
 
               const SizedBox(height: 18),
 

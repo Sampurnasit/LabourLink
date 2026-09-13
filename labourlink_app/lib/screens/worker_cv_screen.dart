@@ -449,39 +449,33 @@ class _WorkerCvScreenState extends State<WorkerCvScreen> {
                             onChanged: (val) => setState(() => _yearsOfExperience = val.toInt()),
                           ),
                           const Divider(),
-                          Row(
-                            children: [
-                              Expanded(
-                                child: TextFormField(
-                                  controller: _wageController,
-                                  decoration: const InputDecoration(
-                                    labelText: 'Daily Wage Expectation',
-                                    hintText: 'e.g. ₹850/day',
-                                    prefixIcon: Icon(Icons.currency_rupee),
-                                    border: OutlineInputBorder(),
-                                  ),
-                                ),
-                              ),
-                              const SizedBox(width: 12),
-                              Expanded(
-                                child: DropdownButtonFormField<String>(
-                                  initialValue: _availabilityType,
-                                  decoration: const InputDecoration(
-                                    labelText: 'Availability',
-                                    border: OutlineInputBorder(),
-                                  ),
-                                  items: const [
-                                    DropdownMenuItem(value: 'Full-time', child: Text('Full-time')),
-                                    DropdownMenuItem(value: 'Part-time', child: Text('Part-time')),
-                                    DropdownMenuItem(value: 'Immediate', child: Text('Immediate')),
-                                    DropdownMenuItem(value: 'Weekends Only', child: Text('Weekends Only')),
-                                  ],
-                                  onChanged: (val) {
-                                    if (val != null) setState(() => _availabilityType = val);
-                                  },
-                                ),
-                              ),
+                          TextFormField(
+                            controller: _wageController,
+                            decoration: const InputDecoration(
+                              labelText: 'Daily Wage Expectation',
+                              hintText: 'e.g. ₹850/day',
+                              prefixIcon: Icon(Icons.currency_rupee),
+                              border: OutlineInputBorder(),
+                            ),
+                          ),
+                          const SizedBox(height: 14),
+                          DropdownButtonFormField<String>(
+                            isExpanded: true,
+                            initialValue: _availabilityType,
+                            decoration: const InputDecoration(
+                              labelText: 'Availability',
+                              prefixIcon: Icon(Icons.schedule_rounded),
+                              border: OutlineInputBorder(),
+                            ),
+                            items: const [
+                              DropdownMenuItem(value: 'Full-time', child: Text('Full-time', overflow: TextOverflow.ellipsis)),
+                              DropdownMenuItem(value: 'Part-time', child: Text('Part-time', overflow: TextOverflow.ellipsis)),
+                              DropdownMenuItem(value: 'Immediate', child: Text('Immediate', overflow: TextOverflow.ellipsis)),
+                              DropdownMenuItem(value: 'Weekends Only', child: Text('Weekends Only', overflow: TextOverflow.ellipsis)),
                             ],
+                            onChanged: (val) {
+                              if (val != null) setState(() => _availabilityType = val);
+                            },
                           ),
                         ],
                       ),

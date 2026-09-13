@@ -252,6 +252,7 @@ class _WorkerRegisterScreenState extends State<WorkerRegisterScreen> {
 
               // Skill Type Dropdown
               DropdownButtonFormField<String>(
+                isExpanded: true,
                 initialValue: _selectedSkill,
                 decoration: InputDecoration(
                   labelText: 'Primary Skill *',
@@ -262,7 +263,7 @@ class _WorkerRegisterScreenState extends State<WorkerRegisterScreen> {
                 ),
                 hint: const Text('Select your skill...'),
                 items: _skills
-                    .map((s) => DropdownMenuItem(value: s, child: Text(s)))
+                    .map((s) => DropdownMenuItem(value: s, child: Text(s, overflow: TextOverflow.ellipsis)))
                     .toList(),
                 onChanged: (val) => setState(() => _selectedSkill = val),
               ),
@@ -271,6 +272,7 @@ class _WorkerRegisterScreenState extends State<WorkerRegisterScreen> {
 
               // Location Dropdown
               DropdownButtonFormField<String>(
+                isExpanded: true,
                 initialValue: _selectedLocation,
                 decoration: InputDecoration(
                   labelText: 'Your Location / Area *',
@@ -281,7 +283,7 @@ class _WorkerRegisterScreenState extends State<WorkerRegisterScreen> {
                 ),
                 hint: const Text('Select neighborhood...'),
                 items: _locations
-                    .map((l) => DropdownMenuItem(value: l, child: Text(l)))
+                    .map((l) => DropdownMenuItem(value: l, child: Text(l, overflow: TextOverflow.ellipsis)))
                     .toList(),
                 onChanged: (val) => setState(() => _selectedLocation = val),
               ),
@@ -299,22 +301,25 @@ class _WorkerRegisterScreenState extends State<WorkerRegisterScreen> {
                 child: Row(
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
-                    const Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          'Available for Work Today?',
-                          style: TextStyle(
-                            fontWeight: FontWeight.w700,
-                            fontSize: 14,
+                    const Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            'Available for Work Today?',
+                            style: TextStyle(
+                              fontWeight: FontWeight.w700,
+                              fontSize: 14,
+                            ),
                           ),
-                        ),
-                        Text(
-                          'Turn off when taking rest or already engaged',
-                          style: TextStyle(fontSize: 11, color: Colors.grey),
-                        ),
-                      ],
+                          Text(
+                            'Turn off when taking rest or already engaged',
+                            style: TextStyle(fontSize: 11, color: Colors.grey),
+                          ),
+                        ],
+                      ),
                     ),
+                    const SizedBox(width: 8),
                     Switch(
                       value: _available,
                       activeThumbColor: const Color(0xFF10B981),

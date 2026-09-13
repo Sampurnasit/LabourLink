@@ -250,6 +250,7 @@ class _EmployerPostJobScreenState extends State<EmployerPostJobScreen> {
               const SizedBox(height: 16),
 
               DropdownButtonFormField<String>(
+                isExpanded: true,
                 initialValue: _selectedSkill,
                 decoration: InputDecoration(
                   labelText: 'Skill Needed *',
@@ -260,7 +261,7 @@ class _EmployerPostJobScreenState extends State<EmployerPostJobScreen> {
                 ),
                 hint: const Text('Select skill required...'),
                 items: _skills
-                    .map((s) => DropdownMenuItem(value: s, child: Text(s)))
+                    .map((s) => DropdownMenuItem(value: s, child: Text(s, overflow: TextOverflow.ellipsis)))
                     .toList(),
                 onChanged: (val) => setState(() => _selectedSkill = val),
               ),
@@ -268,6 +269,7 @@ class _EmployerPostJobScreenState extends State<EmployerPostJobScreen> {
               const SizedBox(height: 16),
 
               DropdownButtonFormField<String>(
+                isExpanded: true,
                 initialValue: _selectedLocation,
                 decoration: InputDecoration(
                   labelText: 'Job Location / Area *',
@@ -278,54 +280,49 @@ class _EmployerPostJobScreenState extends State<EmployerPostJobScreen> {
                 ),
                 hint: const Text('Select neighborhood...'),
                 items: _locations
-                    .map((l) => DropdownMenuItem(value: l, child: Text(l)))
+                    .map((l) => DropdownMenuItem(value: l, child: Text(l, overflow: TextOverflow.ellipsis)))
                     .toList(),
                 onChanged: (val) => setState(() => _selectedLocation = val),
               ),
 
               const SizedBox(height: 16),
 
-              Row(
-                children: [
-                  Expanded(
-                    child: TextFormField(
-                      controller: _wageController,
-                      decoration: InputDecoration(
-                        labelText: 'Daily Wage *',
-                        hintText: '₹850/day',
-                        prefixIcon: const Icon(Icons.currency_rupee),
-                        border: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(12),
-                        ),
-                      ),
-                      validator: (val) {
-                        if (val == null || val.trim().isEmpty) {
-                          return 'Enter wage';
-                        }
-                        return null;
-                      },
-                    ),
+              TextFormField(
+                controller: _wageController,
+                decoration: InputDecoration(
+                  labelText: 'Daily Wage Offered *',
+                  hintText: 'e.g. ₹850/day or ₹1000/day',
+                  prefixIcon: const Icon(Icons.currency_rupee),
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(12),
                   ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: DropdownButtonFormField<String>(
-                      initialValue: _selectedDate,
-                      decoration: InputDecoration(
-                        labelText: 'Date Needed *',
-                        prefixIcon: const Icon(Icons.calendar_today),
-                        border: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(12),
-                        ),
-                      ),
-                      items: _dates
-                          .map((d) => DropdownMenuItem(value: d, child: Text(d)))
-                          .toList(),
-                      onChanged: (val) {
-                        if (val != null) setState(() => _selectedDate = val);
-                      },
-                    ),
+                ),
+                validator: (val) {
+                  if (val == null || val.trim().isEmpty) {
+                    return 'Enter wage';
+                  }
+                  return null;
+                },
+              ),
+
+              const SizedBox(height: 16),
+
+              DropdownButtonFormField<String>(
+                isExpanded: true,
+                initialValue: _selectedDate,
+                decoration: InputDecoration(
+                  labelText: 'Date Needed *',
+                  prefixIcon: const Icon(Icons.calendar_today),
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(12),
                   ),
-                ],
+                ),
+                items: _dates
+                    .map((d) => DropdownMenuItem(value: d, child: Text(d, overflow: TextOverflow.ellipsis)))
+                    .toList(),
+                onChanged: (val) {
+                  if (val != null) setState(() => _selectedDate = val);
+                },
               ),
 
               const SizedBox(height: 24),

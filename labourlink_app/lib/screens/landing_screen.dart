@@ -1,12 +1,13 @@
 import 'package:flutter/material.dart';
 import '../i18n/i18n.dart';
 import '../widgets/language_selector.dart';
+import '../widgets/theme_toggle.dart';
 import 'worker_register_screen.dart';
 import 'employer_post_job_screen.dart';
 import 'role_login_screen.dart';
 
-/// The initial landing screen presenting dual role-selection cards
-/// for Worker and Hirer. Supports multi-language internationalization (en/hi/bn).
+/// The initial landing screen with reactive Light and High-Contrast Dark modes.
+/// Adapts surfaces, cards, and accent contrast dynamically.
 class LandingScreen extends StatefulWidget {
   const LandingScreen({super.key});
 
@@ -25,11 +26,11 @@ class _LandingScreenState extends State<LandingScreen>
     super.initState();
     _animCtrl = AnimationController(
       vsync: this,
-      duration: const Duration(milliseconds: 700),
+      duration: const Duration(milliseconds: 650),
     );
     _fadeAnim = CurvedAnimation(parent: _animCtrl, curve: Curves.easeOut);
     _slideAnim = Tween<Offset>(
-      begin: const Offset(0, 0.12),
+      begin: const Offset(0, 0.08),
       end: Offset.zero,
     ).animate(CurvedAnimation(parent: _animCtrl, curve: Curves.easeOut));
     _animCtrl.forward();
@@ -48,17 +49,22 @@ class _LandingScreenState extends State<LandingScreen>
   @override
   Widget build(BuildContext context) {
     final size = MediaQuery.of(context).size;
-    final isWide = size.width > 600;
+    final isWide = size.width > 680;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
 
     return Scaffold(
-      body: Container(
+      backgroundColor: isDark ? const Color(0xFF0B111E) : const Color(0xFFEEF2F6),
+      body: AnimatedContainer(
+        duration: const Duration(milliseconds: 300),
         width: double.infinity,
         height: double.infinity,
-        decoration: const BoxDecoration(
+        decoration: BoxDecoration(
           gradient: LinearGradient(
-            colors: [Color(0xFF0F172A), Color(0xFF1E293B), Color(0xFF0F172A)],
-            begin: Alignment.topLeft,
-            end: Alignment.bottomRight,
+            colors: isDark
+                ? const [Color(0xFF0F172A), Color(0xFF0B111E), Color(0xFF070C15)]
+                : const [Color(0xFFF4F7FB), Color(0xFFEEF2F6), Color(0xFFE5ECF4)],
+            begin: Alignment.topCenter,
+            end: Alignment.bottomCenter,
           ),
         ),
         child: SafeArea(
@@ -68,74 +74,111 @@ class _LandingScreenState extends State<LandingScreen>
               position: _slideAnim,
               child: SingleChildScrollView(
                 padding: EdgeInsets.symmetric(
-                  horizontal: isWide ? 40 : 20,
+                  horizontal: isWide ? 48 : 20,
                   vertical: 16,
                 ),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.center,
                   children: [
-                    // ── Top Bar with Language Selector ────────────────────
+                    // ── Top Bar with Theme Toggle & Language Selector ────
                     Row(
-                      mainAxisAlignment: MainAxisAlignment.end,
-                      children: const [
-                        LanguageSelector(),
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        // Mini brand tag
+                        Row(
+                          children: [
+                            Container(
+                              width: 34,
+                              height: 34,
+                              decoration: BoxDecoration(
+                                gradient: LinearGradient(
+                                  colors: isDark
+                                      ? const [Color(0xFF38BDF8), Color(0xFF10B981)]
+                                      : const [Color(0xFF0F4C81), Color(0xFF065F46)],
+                                ),
+                                borderRadius: BorderRadius.circular(10),
+                                boxShadow: [
+                                  BoxShadow(
+                                    color: (isDark ? const Color(0xFF38BDF8) : const Color(0xFF0F4C81))
+                                        .withValues(alpha: 0.3),
+                                    blurRadius: 8,
+                                    offset: const Offset(0, 2),
+                                  ),
+                                ],
+                              ),
+                              child: const Icon(Icons.bolt_rounded, color: Colors.white, size: 20),
+                            ),
+                            const SizedBox(width: 10),
+                            Text(
+                              'LabourLink',
+                              style: context.font(
+                                color: isDark ? const Color(0xFFF8FAFC) : const Color(0xFF1A2332),
+                                fontSize: 17,
+                                fontWeight: FontWeight.w800,
+                                letterSpacing: -0.3,
+                              ),
+                            ),
+                          ],
+                        ),
+
+                        // Action Controls: Theme Switch + Language Selector
+                        Row(
+                          children: const [
+                            ThemeToggleButton(showLabel: true),
+                            SizedBox(width: 8),
+                            LanguageSelector(),
+                          ],
+                        ),
                       ],
                     ),
-                    const SizedBox(height: 12),
+                    const SizedBox(height: 24),
 
-                    // ── Logo + Title ──────────────────────────────────────
-                    _buildHeader(context),
+                    // ── Hero Header ───────────────────────────────────────
+                    _buildHeader(context, isDark),
 
-                    const SizedBox(height: 12),
+                    const SizedBox(height: 18),
 
-                    // Tagline
-                    Text(
-                      context.tr('app.tagline'),
-                      textAlign: TextAlign.center,
-                      style: context.font(
-                        color: const Color(0xFF94A3B8),
-                        fontSize: 14,
-                        height: 1.6,
-                      ),
-                    ),
+                    // Signature 4 Circular Category Badges
+                    _buildCategoryBadgeCluster(isDark),
 
-                    const SizedBox(height: 36),
+                    const SizedBox(height: 28),
 
-                    // ── Dual Role Cards ───────────────────────────────────
+                    // ── Section Title ─────────────────────────────────────
                     Text(
                       context.tr('landing.whoAreYou'),
                       style: context.font(
-                        color: Colors.white.withValues(alpha: 0.6),
+                        color: isDark ? const Color(0xFF94A3B8) : const Color(0xFF64748B),
                         fontSize: 13,
-                        fontWeight: FontWeight.w700,
+                        fontWeight: FontWeight.w800,
                         letterSpacing: 1.2,
                       ),
                     ),
-                    const SizedBox(height: 16),
+                    const SizedBox(height: 14),
 
+                    // ── Dual Role Cards ───────────────────────────────────
                     isWide
                         ? Row(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              Expanded(child: _WorkerCard(onNavigate: _navigate)),
-                              const SizedBox(width: 16),
-                              Expanded(child: _HirerCard(onNavigate: _navigate)),
+                              Expanded(child: _WorkerCard(onNavigate: _navigate, isDark: isDark)),
+                              const SizedBox(width: 20),
+                              Expanded(child: _HirerCard(onNavigate: _navigate, isDark: isDark)),
                             ],
                           )
                         : Column(
                             children: [
-                              _WorkerCard(onNavigate: _navigate),
-                              const SizedBox(height: 16),
-                              _HirerCard(onNavigate: _navigate),
+                              _WorkerCard(onNavigate: _navigate, isDark: isDark),
+                              const SizedBox(height: 18),
+                              _HirerCard(onNavigate: _navigate, isDark: isDark),
                             ],
                           ),
 
-                    const SizedBox(height: 36),
+                    const SizedBox(height: 32),
 
                     // ── Browse Jobs row ───────────────────────────────────
-                    _buildBrowseChip(context),
+                    _buildBrowseChip(context, isDark),
 
-                    const SizedBox(height: 24),
+                    const SizedBox(height: 20),
                   ],
                 ),
               ),
@@ -146,56 +189,53 @@ class _LandingScreenState extends State<LandingScreen>
     );
   }
 
-  Widget _buildHeader(BuildContext context) {
+  Widget _buildHeader(BuildContext context, bool isDark) {
     return Column(
       children: [
-        Container(
-          width: 68,
-          height: 68,
-          decoration: BoxDecoration(
-            gradient: const LinearGradient(
-              colors: [Color(0xFF3B82F6), Color(0xFF1D4ED8)],
-              begin: Alignment.topLeft,
-              end: Alignment.bottomRight,
-            ),
-            borderRadius: BorderRadius.circular(20),
-            boxShadow: [
-              BoxShadow(
-                color: const Color(0xFF3B82F6).withValues(alpha: 0.4),
-                blurRadius: 20,
-                offset: const Offset(0, 8),
-              ),
-            ],
-          ),
-          child: const Icon(Icons.bolt_rounded, color: Colors.white, size: 36),
-        ),
-        const SizedBox(height: 16),
+        // App Title
         Text(
           context.tr('app.name'),
           style: context.font(
-            color: Colors.white,
-            fontSize: 32,
+            color: isDark ? const Color(0xFFF8FAFC) : const Color(0xFF1A2332),
+            fontSize: 34,
             fontWeight: FontWeight.w900,
-            letterSpacing: -0.5,
+            letterSpacing: -0.8,
           ),
         ),
         const SizedBox(height: 8),
+
+        // Tagline badge
         Container(
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
           decoration: BoxDecoration(
-            color: const Color(0xFFFEF3C7).withValues(alpha: 0.15),
+            color: isDark ? const Color(0xFF064E3B) : const Color(0xFFD1FAE5),
             borderRadius: BorderRadius.circular(20),
             border: Border.all(
-              color: const Color(0xFFFDE68A).withValues(alpha: 0.3),
+              color: isDark ? const Color(0xFF059669) : const Color(0xFFA7F3D0),
             ),
           ),
           child: Text(
             context.tr('app.taglineBadge'),
             style: context.font(
-              color: const Color(0xFFFDE68A),
+              color: isDark ? const Color(0xFF34D399) : const Color(0xFF047857),
               fontSize: 12,
               fontWeight: FontWeight.w700,
-              letterSpacing: 0.4,
+              letterSpacing: 0.3,
+            ),
+          ),
+        ),
+        const SizedBox(height: 12),
+
+        // Subtitle
+        ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 520),
+          child: Text(
+            context.tr('app.tagline'),
+            textAlign: TextAlign.center,
+            style: context.font(
+              color: isDark ? const Color(0xFF94A3B8) : const Color(0xFF64748B),
+              fontSize: 14,
+              height: 1.55,
             ),
           ),
         ),
@@ -203,40 +243,130 @@ class _LandingScreenState extends State<LandingScreen>
     );
   }
 
-  Widget _buildBrowseChip(BuildContext context) {
+  Widget _buildCategoryBadgeCluster(bool isDark) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+      decoration: BoxDecoration(
+        color: isDark ? const Color(0xFF182234) : Colors.white,
+        borderRadius: BorderRadius.circular(30),
+        border: Border.all(
+          color: isDark ? const Color(0xFF2E3D52) : const Color(0xFFE2E8F0),
+        ),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: isDark ? 0.3 : 0.05),
+            blurRadius: 12,
+            offset: const Offset(0, 4),
+          ),
+        ],
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          _CircleBadge(color: isDark ? const Color(0xFF1D4ED8) : const Color(0xFF0F4C81), icon: Icons.handyman_rounded, tooltip: 'Technical Trades'),
+          const SizedBox(width: 10),
+          _CircleBadge(color: isDark ? const Color(0xFFEA580C) : const Color(0xFFC2410C), icon: Icons.construction_rounded, tooltip: 'Construction & Labor'),
+          const SizedBox(width: 10),
+          _CircleBadge(color: isDark ? const Color(0xFF059669) : const Color(0xFF047857), icon: Icons.verified_user_rounded, tooltip: 'Verified Workers'),
+          const SizedBox(width: 10),
+          _CircleBadge(color: isDark ? const Color(0xFFDC2626) : const Color(0xFFB91C1C), icon: Icons.electric_bolt_rounded, tooltip: 'Instant Dispatch'),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildBrowseChip(BuildContext context, bool isDark) {
+    final highlight = isDark ? const Color(0xFF38BDF8) : const Color(0xFF0F4C81);
+
     return GestureDetector(
       onTap: () {
         Navigator.of(context).pushNamed('/jobs');
       },
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          const Icon(Icons.search, color: Color(0xFF64748B), size: 16),
-          const SizedBox(width: 6),
-          Flexible(
-            child: Text(
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 9),
+        decoration: BoxDecoration(
+          color: isDark ? const Color(0xFF182234) : Colors.white,
+          borderRadius: BorderRadius.circular(20),
+          border: Border.all(
+            color: isDark ? const Color(0xFF2E3D52) : const Color(0xFFCBD5E1),
+          ),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withValues(alpha: isDark ? 0.25 : 0.04),
+              blurRadius: 6,
+              offset: const Offset(0, 2),
+            ),
+          ],
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(Icons.search_rounded, color: highlight, size: 16),
+            const SizedBox(width: 8),
+            Text(
               context.tr('app.browseWithoutLogin'),
-              textAlign: TextAlign.center,
               style: context.font(
-                color: const Color(0xFF64748B),
+                color: highlight,
                 fontSize: 13,
-                decoration: TextDecoration.underline,
-                decorationColor: const Color(0xFF64748B),
+                fontWeight: FontWeight.w700,
               ),
             ),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Worker Card
+// Signature Circular Status Badge Widget
+// ─────────────────────────────────────────────────────────────────────────────
+class _CircleBadge extends StatelessWidget {
+  final Color color;
+  final IconData icon;
+  final String tooltip;
+
+  const _CircleBadge({
+    required this.color,
+    required this.icon,
+    required this.tooltip,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Tooltip(
+      message: tooltip,
+      child: Container(
+        width: 34,
+        height: 34,
+        decoration: BoxDecoration(
+          color: color,
+          shape: BoxShape.circle,
+          boxShadow: [
+            BoxShadow(
+              color: color.withValues(alpha: 0.35),
+              blurRadius: 6,
+              offset: const Offset(0, 2),
+            ),
+          ],
+        ),
+        child: Icon(icon, color: Colors.white, size: 18),
+      ),
+    );
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Worker Card (Emerald Green Theme from Spec with Contrast Adaptation)
 // ─────────────────────────────────────────────────────────────────────────────
 class _WorkerCard extends StatefulWidget {
   final void Function(Widget) onNavigate;
-  const _WorkerCard({required this.onNavigate});
+  final bool isDark;
+
+  const _WorkerCard({
+    required this.onNavigate,
+    required this.isDark,
+  });
 
   @override
   State<_WorkerCard> createState() => _WorkerCardState();
@@ -247,100 +377,162 @@ class _WorkerCardState extends State<_WorkerCard> {
 
   @override
   Widget build(BuildContext context) {
+    final isDark = widget.isDark;
+    final cardBg = isDark ? const Color(0xFF182234) : Colors.white;
+    final borderColor = _hovered
+        ? (isDark ? const Color(0xFF34D399) : const Color(0xFF059669))
+        : (isDark ? const Color(0xFF2E3D52) : const Color(0xFFE2E8F0));
+    final textColor = isDark ? const Color(0xFFF8FAFC) : const Color(0xFF1A2332);
+    final descColor = isDark ? const Color(0xFF94A3B8) : const Color(0xFF64748B);
+
     return MouseRegion(
       onEnter: (_) => setState(() => _hovered = true),
       onExit: (_) => setState(() => _hovered = false),
-      child: AnimatedScale(
-        scale: _hovered ? 1.02 : 1.0,
+      child: AnimatedContainer(
         duration: const Duration(milliseconds: 200),
-        child: Container(
-          padding: const EdgeInsets.all(24),
-          decoration: BoxDecoration(
-            gradient: LinearGradient(
-              colors: _hovered
-                  ? [const Color(0xFFF97316), const Color(0xFFEA580C)]
-                  : [const Color(0xFFFA8231), const Color(0xFFD97706)],
-              begin: Alignment.topLeft,
-              end: Alignment.bottomRight,
-            ),
-            borderRadius: BorderRadius.circular(24),
-            boxShadow: [
-              BoxShadow(
-                color: const Color(0xFFF97316).withValues(alpha: _hovered ? 0.5 : 0.3),
-                blurRadius: _hovered ? 28 : 18,
-                offset: const Offset(0, 8),
-              ),
-            ],
+        padding: const EdgeInsets.all(24),
+        decoration: BoxDecoration(
+          color: cardBg,
+          borderRadius: BorderRadius.circular(24),
+          border: Border.all(
+            color: borderColor,
+            width: _hovered ? 1.5 : 1,
           ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.center,
-            children: [
-              // Icon
-              Container(
-                width: 72,
-                height: 72,
-                decoration: BoxDecoration(
-                  color: Colors.white.withValues(alpha: 0.2),
-                  shape: BoxShape.circle,
+          boxShadow: [
+            BoxShadow(
+              color: (isDark ? Colors.black : const Color(0xFF059669))
+                  .withValues(alpha: _hovered ? 0.35 : 0.08),
+              blurRadius: _hovered ? 24 : 14,
+              offset: const Offset(0, 8),
+            ),
+          ],
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // Top Row: Square green badge + pill tag
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Container(
+                  width: 48,
+                  height: 48,
+                  decoration: BoxDecoration(
+                    color: isDark ? const Color(0xFF064E3B) : const Color(0xFF065F46),
+                    borderRadius: BorderRadius.circular(14),
+                    border: Border.all(
+                      color: isDark ? const Color(0xFF059669) : Colors.transparent,
+                    ),
+                    boxShadow: const [
+                      BoxShadow(
+                        color: Color(0x33065F46),
+                        blurRadius: 10,
+                        offset: Offset(0, 4),
+                      ),
+                    ],
+                  ),
+                  child: const Icon(Icons.engineering_rounded, color: Color(0xFF34D399), size: 26),
                 ),
-                child: const Icon(
-                  Icons.engineering_rounded,
-                  color: Colors.white,
-                  size: 38,
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                  decoration: BoxDecoration(
+                    color: isDark ? const Color(0xFF064E3B) : const Color(0xFFECFDF5),
+                    borderRadius: BorderRadius.circular(20),
+                    border: Border.all(
+                      color: isDark ? const Color(0xFF059669) : const Color(0xFFA7F3D0),
+                    ),
+                  ),
+                  child: Text(
+                    'Worker Portal',
+                    style: context.font(
+                      color: isDark ? const Color(0xFF34D399) : const Color(0xFF047857),
+                      fontSize: 11,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
                 ),
-              ),
-              const SizedBox(height: 16),
+              ],
+            ),
+            const SizedBox(height: 18),
 
-              // Title
-              Text(
-                context.tr('role.workerCardTitle'),
-                textAlign: TextAlign.center,
-                style: context.font(
-                  color: Colors.white,
-                  fontSize: 22,
-                  fontWeight: FontWeight.w800,
-                ),
+            // Title
+            Text(
+              context.tr('role.workerCardTitle'),
+              style: context.font(
+                color: textColor,
+                fontSize: 21,
+                fontWeight: FontWeight.w800,
+                letterSpacing: -0.3,
               ),
-              const SizedBox(height: 8),
-              Text(
-                context.tr('role.workerCardDesc'),
-                textAlign: TextAlign.center,
-                style: context.font(
-                  color: Colors.white.withValues(alpha: 0.85),
-                  fontSize: 13,
-                  height: 1.4,
-                ),
+            ),
+            const SizedBox(height: 8),
+
+            // Description
+            Text(
+              context.tr('role.workerCardDesc'),
+              style: context.font(
+                color: descColor,
+                fontSize: 13,
+                height: 1.5,
               ),
+            ),
 
-              const SizedBox(height: 24),
+            const SizedBox(height: 24),
 
-              // Log In button
-              _CardButton(
-                label: context.tr('action.logIn'),
-                icon: Icons.login_rounded,
-                onTap: () => widget.onNavigate(
+            // Primary Emerald Action Button
+            SizedBox(
+              width: double.infinity,
+              child: ElevatedButton.icon(
+                onPressed: () => widget.onNavigate(
                   const RoleLoginScreen(role: 'worker'),
                 ),
-              ),
-
-              const SizedBox(height: 12),
-
-              // Register link
-              GestureDetector(
-                onTap: () => widget.onNavigate(const WorkerRegisterScreen()),
-                child: Text(
-                  context.tr('action.orRegister'),
+                icon: const Icon(Icons.login_rounded, size: 18),
+                label: Text(
+                  context.tr('action.logIn'),
                   style: context.font(
-                    color: Colors.white.withValues(alpha: 0.9),
-                    fontSize: 13,
-                    fontWeight: FontWeight.w600,
-                    decoration: TextDecoration.underline,
-                    decorationColor: Colors.white.withValues(alpha: 0.6),
+                    fontWeight: FontWeight.w700,
+                    fontSize: 15,
+                  ),
+                ),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: isDark ? const Color(0xFF059669) : const Color(0xFF047857),
+                  foregroundColor: Colors.white,
+                  elevation: isDark ? 2 : 0,
+                  padding: const EdgeInsets.symmetric(vertical: 14),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(14),
                   ),
                 ),
               ),
-            ],
-          ),
+            ),
+
+            const SizedBox(height: 10),
+
+            // Secondary Outlined Register Button
+            SizedBox(
+              width: double.infinity,
+              child: OutlinedButton(
+                onPressed: () => widget.onNavigate(const WorkerRegisterScreen()),
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: isDark ? const Color(0xFF34D399) : const Color(0xFF047857),
+                  side: BorderSide(
+                    color: isDark ? const Color(0xFF334155) : const Color(0xFFCBD5E1),
+                  ),
+                  padding: const EdgeInsets.symmetric(vertical: 13),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(14),
+                  ),
+                ),
+                child: Text(
+                  context.tr('action.orRegister'),
+                  style: context.font(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ),
+            ),
+          ],
         ),
       ),
     );
@@ -348,11 +540,16 @@ class _WorkerCardState extends State<_WorkerCard> {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Hirer Card
+// Hirer Card (Royal Navy Theme with Contrast Adaptation)
 // ─────────────────────────────────────────────────────────────────────────────
 class _HirerCard extends StatefulWidget {
   final void Function(Widget) onNavigate;
-  const _HirerCard({required this.onNavigate});
+  final bool isDark;
+
+  const _HirerCard({
+    required this.onNavigate,
+    required this.isDark,
+  });
 
   @override
   State<_HirerCard> createState() => _HirerCardState();
@@ -363,142 +560,160 @@ class _HirerCardState extends State<_HirerCard> {
 
   @override
   Widget build(BuildContext context) {
+    final isDark = widget.isDark;
+    final cardBg = isDark ? const Color(0xFF182234) : Colors.white;
+    final borderColor = _hovered
+        ? (isDark ? const Color(0xFF60A5FA) : const Color(0xFF0F4C81))
+        : (isDark ? const Color(0xFF2E3D52) : const Color(0xFFE2E8F0));
+    final textColor = isDark ? const Color(0xFFF8FAFC) : const Color(0xFF1A2332);
+    final descColor = isDark ? const Color(0xFF94A3B8) : const Color(0xFF64748B);
+
     return MouseRegion(
       onEnter: (_) => setState(() => _hovered = true),
       onExit: (_) => setState(() => _hovered = false),
-      child: AnimatedScale(
-        scale: _hovered ? 1.02 : 1.0,
+      child: AnimatedContainer(
         duration: const Duration(milliseconds: 200),
-        child: Container(
-          padding: const EdgeInsets.all(24),
-          decoration: BoxDecoration(
-            gradient: LinearGradient(
-              colors: _hovered
-                  ? [const Color(0xFF0891B2), const Color(0xFF0E7490)]
-                  : [const Color(0xFF06B6D4), const Color(0xFF0284C7)],
-              begin: Alignment.topLeft,
-              end: Alignment.bottomRight,
-            ),
-            borderRadius: BorderRadius.circular(24),
-            boxShadow: [
-              BoxShadow(
-                color: const Color(0xFF06B6D4).withValues(alpha: _hovered ? 0.5 : 0.3),
-                blurRadius: _hovered ? 28 : 18,
-                offset: const Offset(0, 8),
-              ),
-            ],
+        padding: const EdgeInsets.all(24),
+        decoration: BoxDecoration(
+          color: cardBg,
+          borderRadius: BorderRadius.circular(24),
+          border: Border.all(
+            color: borderColor,
+            width: _hovered ? 1.5 : 1,
           ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.center,
-            children: [
-              // Icon
-              Container(
-                width: 72,
-                height: 72,
-                decoration: BoxDecoration(
-                  color: Colors.white.withValues(alpha: 0.2),
-                  shape: BoxShape.circle,
+          boxShadow: [
+            BoxShadow(
+              color: (isDark ? Colors.black : const Color(0xFF0F4C81))
+                  .withValues(alpha: _hovered ? 0.35 : 0.08),
+              blurRadius: _hovered ? 24 : 14,
+              offset: const Offset(0, 8),
+            ),
+          ],
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // Top Row: Navy Badge + Pill Tag
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Container(
+                  width: 48,
+                  height: 48,
+                  decoration: BoxDecoration(
+                    color: isDark ? const Color(0xFF1E293B) : const Color(0xFFEBF2F9),
+                    borderRadius: BorderRadius.circular(14),
+                    border: Border.all(
+                      color: isDark ? const Color(0xFF334155) : const Color(0xFFD7E5F5),
+                    ),
+                  ),
+                  child: Icon(
+                    Icons.business_center_rounded,
+                    color: isDark ? const Color(0xFF38BDF8) : const Color(0xFF0F4C81),
+                    size: 26,
+                  ),
                 ),
-                child: const Icon(
-                  Icons.business_center_rounded,
-                  color: Colors.white,
-                  size: 38,
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                  decoration: BoxDecoration(
+                    color: isDark ? const Color(0xFF1E293B) : const Color(0xFFEBF2F9),
+                    borderRadius: BorderRadius.circular(20),
+                    border: Border.all(
+                      color: isDark ? const Color(0xFF334155) : const Color(0xFFD7E5F5),
+                    ),
+                  ),
+                  child: Text(
+                    'Employer Desk',
+                    style: context.font(
+                      color: isDark ? const Color(0xFF38BDF8) : const Color(0xFF0F4C81),
+                      fontSize: 11,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
                 ),
-              ),
-              const SizedBox(height: 16),
+              ],
+            ),
+            const SizedBox(height: 18),
 
-              // Title
-              Text(
-                context.tr('role.hirerCardTitle'),
-                textAlign: TextAlign.center,
-                style: context.font(
-                  color: Colors.white,
-                  fontSize: 22,
-                  fontWeight: FontWeight.w800,
-                ),
+            // Title
+            Text(
+              context.tr('role.hirerCardTitle'),
+              style: context.font(
+                color: textColor,
+                fontSize: 21,
+                fontWeight: FontWeight.w800,
+                letterSpacing: -0.3,
               ),
-              const SizedBox(height: 8),
-              Text(
-                context.tr('role.hirerCardDesc'),
-                textAlign: TextAlign.center,
-                style: context.font(
-                  color: Colors.white.withValues(alpha: 0.85),
-                  fontSize: 13,
-                  height: 1.4,
-                ),
+            ),
+            const SizedBox(height: 8),
+
+            // Description
+            Text(
+              context.tr('role.hirerCardDesc'),
+              style: context.font(
+                color: descColor,
+                fontSize: 13,
+                height: 1.5,
               ),
+            ),
 
-              const SizedBox(height: 24),
+            const SizedBox(height: 24),
 
-              // Log In button
-              _CardButton(
-                label: context.tr('action.logIn'),
-                icon: Icons.login_rounded,
-                onTap: () => widget.onNavigate(
+            // Primary Royal Navy Pill Action Button
+            SizedBox(
+              width: double.infinity,
+              child: ElevatedButton.icon(
+                onPressed: () => widget.onNavigate(
                   const RoleLoginScreen(role: 'hirer'),
                 ),
+                icon: const Icon(Icons.login_rounded, size: 18),
+                label: Text(
+                  context.tr('action.logIn'),
+                  style: context.font(
+                    fontWeight: FontWeight.w700,
+                    fontSize: 15,
+                  ),
+                ),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: isDark ? const Color(0xFF0F4C81) : const Color(0xFF0F4C81),
+                  foregroundColor: Colors.white,
+                  elevation: isDark ? 2 : 0,
+                  padding: const EdgeInsets.symmetric(vertical: 14),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(14),
+                  ),
+                  shadowColor: const Color(0x400F4C81),
+                ),
               ),
+            ),
 
-              const SizedBox(height: 12),
+            const SizedBox(height: 10),
 
-              // Register link
-              GestureDetector(
-                onTap: () => widget.onNavigate(const EmployerPostJobScreen()),
+            // Secondary Outlined Post Job Button
+            SizedBox(
+              width: double.infinity,
+              child: OutlinedButton(
+                onPressed: () => widget.onNavigate(const EmployerPostJobScreen()),
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: isDark ? const Color(0xFF38BDF8) : const Color(0xFF0F4C81),
+                  side: BorderSide(
+                    color: isDark ? const Color(0xFF334155) : const Color(0xFFCBD5E1),
+                  ),
+                  padding: const EdgeInsets.symmetric(vertical: 13),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(14),
+                  ),
+                ),
                 child: Text(
                   context.tr('action.orRegister'),
                   style: context.font(
-                    color: Colors.white.withValues(alpha: 0.9),
                     fontSize: 13,
-                    fontWeight: FontWeight.w600,
-                    decoration: TextDecoration.underline,
-                    decorationColor: Colors.white.withValues(alpha: 0.6),
+                    fontWeight: FontWeight.w700,
                   ),
                 ),
               ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Shared styled button inside cards
-// ─────────────────────────────────────────────────────────────────────────────
-class _CardButton extends StatelessWidget {
-  final String label;
-  final IconData icon;
-  final VoidCallback onTap;
-
-  const _CardButton({
-    required this.label,
-    required this.icon,
-    required this.onTap,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return SizedBox(
-      width: double.infinity,
-      child: ElevatedButton.icon(
-        onPressed: onTap,
-        icon: Icon(icon, size: 18),
-        label: Text(
-          label,
-          style: context.font(
-            fontWeight: FontWeight.w700,
-            fontSize: 15,
-          ),
-        ),
-        style: ElevatedButton.styleFrom(
-          backgroundColor: Colors.white,
-          foregroundColor: const Color(0xFF0F172A),
-          elevation: 0,
-          padding: const EdgeInsets.symmetric(vertical: 14),
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(14),
-          ),
+            ),
+          ],
         ),
       ),
     );

@@ -43,6 +43,9 @@ labourlink_app/ios/Pods/
 labourlink_app/ios/.symlinks/
 
 # IDE and OS files
+# Temporary clones & artifacts
+_external_dialai/
+dialai/
 .idea/
 .vscode/
 *.swp

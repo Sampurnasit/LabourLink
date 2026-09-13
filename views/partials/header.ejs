@@ -9,6 +9,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+Bengali:wght@400;500;600;700&family=Noto+Sans+Devanagari:wght@400;500;600;700&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="/css/style.css">
+  <script src="/js/theme.js"></script>
   <script src="/js/i18n.js" defer></script>
 </head>
 <body>
@@ -20,7 +21,7 @@
         <span class="brand-badge">Labor Chowk</span>
       </a>
 
-      <nav style="display: flex; align-items: center; gap: 1rem;">
+      <nav style="display: flex; align-items: center; gap: 0.85rem;">
         <ul class="nav-links">
           <li><a href="/" class="nav-link <%= typeof activePage !== 'undefined' && activePage === 'home' ? 'active' : '' %>" id="nav-home" data-i18n="nav.home">Home</a></li>
           <li><a href="/jobs" class="nav-link <%= typeof activePage !== 'undefined' && activePage === 'jobs' ? 'active' : '' %>" id="nav-public-jobs" data-i18n="nav.jobs">Public Job Board</a></li>
@@ -31,9 +32,15 @@
           <li><a href="/employer/post-job" class="btn btn-sm btn-primary nav-cta" id="nav-post-job-cta" data-i18n="nav.postJob">+ Post a Job</a></li>
         </ul>
 
+        <!-- Theme Mode Toggle Button -->
+        <button type="button" class="theme-toggle-btn" id="theme-toggle-btn" aria-label="Toggle Light/Dark Theme" title="Toggle Light/Dark Theme">
+          <span class="theme-icon">🌙</span>
+          <span class="theme-label">Dark</span>
+        </button>
+
         <!-- Language Selector -->
         <div class="lang-selector-container" style="display: inline-flex; align-items: center;">
-          <select class="lang-select-dropdown" aria-label="Language Selector" style="padding: 0.35rem 0.65rem; border-radius: 8px; border: 1px solid #cbd5e1; background: #ffffff; font-size: 0.85rem; font-weight: 600; cursor: pointer; color: #1e293b;">
+          <select class="lang-select-dropdown" aria-label="Language Selector" style="padding: 0.35rem 0.65rem; border-radius: 8px; border: 1px solid var(--border-subtle); background: var(--bg-card); font-size: 0.85rem; font-weight: 600; cursor: pointer; color: var(--text-main);">
             <option value="en">English (English)</option>
             <option value="hi">हिन्दी (Hindi)</option>
             <option value="bn">বাংলা (Bengali)</option>

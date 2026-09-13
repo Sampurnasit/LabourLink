@@ -258,6 +258,12 @@ async function seed() {
   }
 
   console.log('✓ Seeded sample job interests, active bookings, worker CVs, and ratings');
+
+  const ivrService = require('./services/ivrService');
+  await ivrService.seedDefaultCategoriesIfEmpty();
+  const cats = await db.allAsync('SELECT digit, category_name FROM job_categories ORDER BY digit');
+  console.log(`✓ IVR job categories: ${cats.map((c) => `${c.digit}:${c.category_name}`).join(', ')}`);
+
   console.log('Database seeding complete!');
 }
 

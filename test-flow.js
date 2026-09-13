@@ -484,7 +484,47 @@ async function runTests() {
   const jobXInApplied = vikramDash.appliedJobs.find(j => j.id === jobXId);
   console.log(`[27] Worker Dashboard History Check -> Job X found in applied: ${!!jobXInApplied}, status: "${jobXInApplied?.interest_status}" (Expected "rejected")`);
 
-  console.log('\n--- ALL 27 AUTOMATED VERIFICATION TESTS PASSED SUCCESSFULLY! ---');
+  const ivrIncoming = await request({
+    hostname: 'localhost',
+    port: 3000,
+    path: '/webhooks/voice/incoming',
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/x-www-form-urlencoded',
+      'Content-Length': Buffer.byteLength('CallSid=CAtestflow1&From=%2B919812345678&To=%2B18001234567')
+    }
+  }, 'CallSid=CAtestflow1&From=%2B919812345678&To=%2B18001234567');
+  const ivrXml = ivrIncoming.body || '';
+  console.log(`[28] POST /webhooks/voice/incoming -> Status: ${ivrIncoming.statusCode}, TwiML Gather: ${ivrXml.includes('<Gather')}, Construction prompt: ${ivrXml.includes('Construction')}`);
+
+  const gatherBody = 'CallSid=CAtestflow1&From=%2B919812345678&Digits=1';
+  const ivrGather = await request({
+    hostname: 'localhost',
+    port: 3000,
+    path: '/webhooks/voice/gather?attempt=1',
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/x-www-form-urlencoded',
+      'Content-Length': Buffer.byteLength(gatherBody)
+    }
+  }, gatherBody);
+  const gatherXml = ivrGather.body || '';
+  const routed = gatherXml.includes('<Dial') || gatherXml.includes('notified') || gatherXml.includes('Hangup');
+  console.log(`[29] POST /webhooks/voice/gather Digits=1 -> Status: ${ivrGather.statusCode}, Routed/notified XML: ${routed}`);
+
+  const catsRes = await request({
+    hostname: 'localhost',
+    port: 3000,
+    path: '/api/admin/ivr/categories',
+    method: 'GET'
+  });
+  let catCount = 0;
+  try {
+    catCount = JSON.parse(catsRes.body).count || 0;
+  } catch (_) {}
+  console.log(`[30] GET /api/admin/ivr/categories -> Status: ${catsRes.statusCode}, Count: ${catCount}`);
+
+  console.log('\n--- ALL AUTOMATED VERIFICATION TESTS COMPLETED ---');
   process.exit(0);
 }
 

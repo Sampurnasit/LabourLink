@@ -4,59 +4,149 @@
    ========================================================================== */
 
 :root {
-  /* Color Palette */
-  --primary-hue: 221;
-  --primary-sat: 83%;
-  --primary: hsl(var(--primary-hue), var(--primary-sat), 53%);
-  --primary-hover: hsl(var(--primary-hue), var(--primary-sat), 45%);
-  --primary-light: hsl(var(--primary-hue), var(--primary-sat), 96%);
-  --primary-glow: hsla(var(--primary-hue), var(--primary-sat), 53%, 0.25);
+  /* Design System Palette (from UI/UX spec) */
+  --palette-navy-deep: #0F4C81;
+  --palette-navy-hover: #0A365C;
+  --palette-navy-light: #EBF2F9;
+  --palette-navy-glow: rgba(15, 76, 129, 0.22);
 
-  --accent-amber: #f59e0b;
-  --accent-amber-light: #fef3c7;
-  --accent-amber-glow: rgba(245, 158, 11, 0.2);
+  /* Green Scale (from palette spec) */
+  --green-900: #064E3B;
+  --green-800: #065F46;
+  --green-700: #047857;
+  --green-600: #059669;
+  --green-500: #10B981;
+  --green-400: #34D399;
+  --green-300: #6EE7B7;
+  --green-200: #A7F3D0;
+  --green-100: #D1FAE5;
+  --green-50: #ECFDF5;
 
-  --success-emerald: #10b981;
-  --success-emerald-light: #d1fae5;
-  --success-glow: rgba(16, 185, 129, 0.2);
+  /* Accent Circular Badges */
+  --badge-blue: #0F4C81;
+  --badge-amber: #C2410C;
+  --badge-green: #047857;
+  --badge-red: #B91C1C;
 
-  --danger-rose: #f43f5e;
-  --danger-light: #ffe4e6;
+  /* Primary Theme Bindings */
+  --primary: var(--palette-navy-deep);
+  --primary-hover: var(--palette-navy-hover);
+  --primary-light: var(--palette-navy-light);
+  --primary-glow: var(--palette-navy-glow);
 
-  /* Neutrals & Surfaces */
-  --bg-main: #f8fafc;
-  --bg-card: #ffffff;
-  --bg-glass: rgba(255, 255, 255, 0.85);
-  --border-subtle: #e2e8f0;
-  --border-focus: #3b82f6;
+  --accent-amber: #C2410C;
+  --accent-amber-light: #FFEDD5;
+  --accent-amber-glow: rgba(194, 65, 12, 0.2);
 
-  --text-main: #0f172a;
-  --text-muted: #64748b;
-  --text-light: #94a3b8;
-  --text-white: #ffffff;
+  --success-emerald: #059669;
+  --success-emerald-light: #D1FAE5;
+  --success-glow: rgba(5, 150, 105, 0.2);
+
+  --danger-rose: #B91C1C;
+  --danger-light: #FEE2E2;
+
+  /* Neutrals & Surfaces (Soft light canvas + dark slate contrast) */
+  --bg-main: #EEF2F6;
+  --bg-card: #FFFFFF;
+  --bg-card-muted: #F8FAFC;
+  --bg-dark-card: #1A2332;
+  --bg-glass: rgba(255, 255, 255, 0.92);
+  --border-subtle: #E2E8F0;
+  --border-focus: #0F4C81;
+
+  --text-main: #1A2332;
+  --text-muted: #64748B;
+  --text-light: #94A3B8;
+  --text-white: #FFFFFF;
 
   /* Gradients */
-  --gradient-hero: linear-gradient(135deg, #1e293b 0%, #0f172a 100%);
-  --gradient-accent: linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%);
-  --gradient-worker: linear-gradient(135deg, #0284c7 0%, #0369a1 100%);
-  --gradient-employer: linear-gradient(135deg, #d97706 0%, #b45309 100%);
-  --gradient-success: linear-gradient(135deg, #059669 0%, #047857 100%);
+  --gradient-hero: linear-gradient(135deg, #1A2332 0%, #0F172A 100%);
+  --gradient-accent: linear-gradient(135deg, #0F4C81 0%, #065F46 100%);
+  --gradient-worker: linear-gradient(135deg, #065F46 0%, #047857 100%);
+  --gradient-employer: linear-gradient(135deg, #0F4C81 0%, #1E3A8A 100%);
+  --gradient-success: linear-gradient(135deg, #059669 0%, #10B981 100%);
 
   /* Shadows */
-  --shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
-  --shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.08), 0 2px 4px -1px rgba(0, 0, 0, 0.04);
-  --shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.08), 0 4px 6px -2px rgba(0, 0, 0, 0.03);
-  --shadow-xl: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04);
-  --shadow-glow: 0 0 20px var(--primary-glow);
+  --shadow-sm: 0 1px 3px rgba(15, 23, 42, 0.05);
+  --shadow-md: 0 4px 12px -2px rgba(15, 23, 42, 0.07), 0 2px 4px -1px rgba(15, 23, 42, 0.04);
+  --shadow-lg: 0 12px 24px -4px rgba(15, 23, 42, 0.09), 0 4px 8px -2px rgba(15, 23, 42, 0.03);
+  --shadow-xl: 0 20px 30px -6px rgba(15, 23, 42, 0.10), 0 10px 12px -4px rgba(15, 23, 42, 0.04);
+  --shadow-glow: 0 0 24px var(--palette-navy-glow);
 
   /* Dimensions & Radius */
-  --radius-sm: 6px;
-  --radius-md: 12px;
-  --radius-lg: 16px;
+  --radius-sm: 8px;
+  --radius-md: 14px;
+  --radius-lg: 20px;
+  --radius-xl: 24px;
   --radius-full: 9999px;
 
   --transition-fast: 150ms cubic-bezier(0.4, 0, 0.2, 1);
   --transition-normal: 250ms cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* ── Dark Theme (Slightly High-Contrast Mode) ──────────────────────────────── */
+[data-theme="dark"] {
+  --bg-main: #0B111E;
+  --bg-card: #182234;
+  --bg-card-muted: #1E293B;
+  --bg-dark-card: #0F172A;
+  --bg-glass: rgba(24, 34, 52, 0.94);
+  --border-subtle: #2E3D52;
+  --border-focus: #38BDF8;
+
+  --text-main: #F8FAFC;
+  --text-muted: #94A3B8;
+  --text-light: #64748B;
+  --text-white: #FFFFFF;
+
+  --palette-navy-deep: #2563EB;
+  --palette-navy-hover: #1D4ED8;
+  --palette-navy-light: #1E293B;
+  --palette-navy-glow: rgba(37, 99, 235, 0.35);
+
+  --green-900: #022C22;
+  --green-800: #064E3B;
+  --green-700: #059669;
+  --green-600: #10B981;
+  --green-500: #34D399;
+  --green-100: #064E3B;
+  --green-50: #022C22;
+
+  --primary: #38BDF8;
+  --primary-hover: #0EA5E9;
+  --primary-light: #1E293B;
+
+  --success-emerald: #10B981;
+  --success-emerald-light: #064E3B;
+
+  --accent-amber: #FB923C;
+  --accent-amber-light: #431407;
+
+  --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.35);
+  --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.45);
+  --shadow-lg: 0 12px 24px rgba(0, 0, 0, 0.55);
+  --shadow-xl: 0 20px 30px rgba(0, 0, 0, 0.65);
+}
+
+.theme-toggle-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.35rem 0.75rem;
+  border-radius: var(--radius-full);
+  border: 1px solid var(--border-subtle);
+  background: var(--bg-card);
+  color: var(--text-main);
+  font-size: 0.82rem;
+  font-weight: 700;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+  box-shadow: var(--shadow-sm);
+}
+
+.theme-toggle-btn:hover {
+  border-color: var(--primary);
+  transform: translateY(-1px);
 }
 
 /* Reset & Base */
@@ -311,18 +401,21 @@ a:hover {
 }
 
 .worker-icon-bg {
-  background: #e0f2fe;
-  color: #0284c7;
+  background: var(--green-50);
+  color: var(--green-700);
+  border: 1px solid var(--green-100);
 }
 
 .employer-icon-bg {
-  background: #fef3c7;
-  color: #d97706;
+  background: var(--palette-navy-light);
+  color: var(--palette-navy-deep);
+  border: 1px solid #D7E5F5;
 }
 
 .action-card-title {
   font-size: 1.45rem;
   font-weight: 700;
+  color: var(--text-main);
   margin-bottom: 0.6rem;
 }
 
@@ -339,7 +432,7 @@ a:hover {
   gap: 0.75rem;
 }
 
-/* Buttons */
+/* Buttons & Signature UI/UX Elements */
 .btn {
   display: inline-flex;
   align-items: center;
@@ -361,36 +454,36 @@ a:hover {
 }
 
 .btn-primary {
-  background: var(--gradient-accent);
+  background: var(--palette-navy-deep);
   color: white;
-  box-shadow: 0 4px 12px var(--primary-glow);
+  box-shadow: 0 4px 14px var(--palette-navy-glow);
 }
 
 .btn-primary:hover {
-  background: #1d4ed8;
+  background: var(--palette-navy-hover);
   color: white;
-  box-shadow: 0 6px 16px var(--primary-glow);
+  box-shadow: 0 6px 18px var(--palette-navy-glow);
 }
 
 .btn-worker {
   background: var(--gradient-worker);
   color: white;
-  box-shadow: 0 4px 12px rgba(2, 132, 199, 0.3);
+  box-shadow: 0 4px 14px rgba(4, 120, 87, 0.28);
 }
 
 .btn-worker:hover {
-  background: #0369a1;
+  background: #064E3B;
   color: white;
 }
 
 .btn-employer {
   background: var(--gradient-employer);
   color: white;
-  box-shadow: 0 4px 12px rgba(217, 119, 6, 0.3);
+  box-shadow: 0 4px 14px var(--palette-navy-glow);
 }
 
 .btn-employer:hover {
-  background: #b45309;
+  background: var(--palette-navy-hover);
   color: white;
 }
 
@@ -406,15 +499,84 @@ a:hover {
 }
 
 .btn-outline {
-  background: transparent;
+  background: #FFFFFF;
   color: var(--text-main);
   border: 1px solid var(--border-subtle);
+  box-shadow: var(--shadow-sm);
 }
 
 .btn-outline:hover {
-  background: #f1f5f9;
-  border-color: #cbd5e1;
+  background: var(--bg-card-muted);
+  border-color: #CBD5E1;
 }
+
+/* Signature UI/UX Pill & Badge Components from reference */
+.btn-pill-navy {
+  background: var(--palette-navy-deep);
+  color: #FFFFFF !important;
+  border-radius: var(--radius-full);
+  padding: 0.5rem 1.25rem;
+  font-size: 0.88rem;
+  font-weight: 700;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  box-shadow: 0 4px 12px var(--palette-navy-glow);
+  transition: all var(--transition-fast);
+}
+
+.btn-pill-navy:hover {
+  background: var(--palette-navy-hover);
+  transform: translateY(-1px);
+}
+
+.badge-square-green {
+  width: 44px;
+  height: 44px;
+  border-radius: 12px;
+  background: var(--green-800);
+  color: var(--green-300);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.2rem;
+  box-shadow: 0 4px 10px rgba(6, 95, 70, 0.25);
+  transition: transform var(--transition-fast);
+}
+
+.badge-square-green:hover {
+  transform: scale(1.05);
+}
+
+/* 4 Circular Status Badges from reference design */
+.palette-icon-cluster {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.circle-badge {
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: #FFFFFF;
+  font-size: 0.85rem;
+  font-weight: 700;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.12);
+  transition: transform var(--transition-fast);
+}
+
+.circle-badge:hover {
+  transform: translateY(-2px);
+}
+
+.circle-badge-blue { background: var(--badge-blue); }
+.circle-badge-amber { background: var(--badge-amber); }
+.circle-badge-green { background: var(--badge-green); }
+.circle-badge-red { background: var(--badge-red); }
 
 .btn-sm {
   padding: 0.4rem 0.85rem;
